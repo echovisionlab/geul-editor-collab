@@ -1,0 +1,14 @@
+packages:
+  - "."
+
+blockExoticSubdeps: false
+
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - "@echovisionlab/geul-proto@0.1.1"
+  - "@echovisionlab/geul-common@0.1.1"
+  - "@echovisionlab/geul-event@0.1.1"
+  - "@echovisionlab/geul-telemetry@0.1.0"

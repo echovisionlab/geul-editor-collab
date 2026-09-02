@@ -1,0 +1,36 @@
+name: geul-editor-collab
+
+services:
+  collab-prod:
+    image: ${GEUL_COLLAB_IMAGE:?set GEUL_COLLAB_IMAGE to a full image reference}
+    container_name: geul-collab-prod
+    ports:
+      - "127.0.0.1:${GEUL_APP_STACK_COLLAB_PUBLIC_PORT:-3003}:3003"
+    environment:
+      PORT: 3003
+      HEALTH_PORT: 3004
+      SHUTDOWN_TIMEOUT_MS: ${GEUL_COLLAB_SHUTDOWN_TIMEOUT_MS:-25000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${GEUL_OTEL_EXPORTER_OTLP_ENDPOINT:?set GEUL_OTEL_EXPORTER_OTLP_ENDPOINT for telemetry}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${GEUL_OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_RESOURCE_ATTRIBUTES: ${GEUL_OTEL_RESOURCE_ATTRIBUTES:-service.namespace=geul,deployment.environment=production}
+      DATABASE_DSN: ${GEUL_COLLAB_DATABASE_DSN:?set GEUL_COLLAB_DATABASE_DSN for PostgreSQL and PGMQ}
+      API_URL: ${GEUL_COLLAB_API_URL:?set GEUL_COLLAB_API_URL for the production API endpoint}
+      SITE_ORIGIN: ${GEUL_SITE_ORIGIN:?set GEUL_SITE_ORIGIN to the canonical browser origin}
+      MANAGED_MEDIA_ORIGINS: ${GEUL_MANAGED_MEDIA_ORIGINS:?set GEUL_MANAGED_MEDIA_ORIGINS to comma-separated absolute media origins}
+      TOKEN_SIGNING_SECRET: ${GEUL_BACKEND_TOKEN_SIGNING_SECRET:?set GEUL_BACKEND_TOKEN_SIGNING_SECRET for trusted backend calls}
+    restart: unless-stopped
+    stop_grace_period: ${GEUL_COLLAB_STOP_GRACE_PERIOD:-180s}
+    networks:
+      runtime:
+        aliases:
+          - geul-app-collab-prod
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3004/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  runtime:
+    name: ${GEUL_APP_RUNTIME_NETWORK_NAME:-geul-runtime}
+    external: true

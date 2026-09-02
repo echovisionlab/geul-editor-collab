@@ -1,0 +1,38 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "rewriteRelativeImportExtensions": false,
+    "paths": {
+      "@echovisionlab/geul-common": ["../geul-common/src/index.ts"],
+      "@echovisionlab/geul-common/*": ["../geul-common/src/*"],
+      "@echovisionlab/geul-event": [
+        "../geul-event-contracts/packages/event/src/index.ts"
+      ],
+      "@echovisionlab/geul-proto/common/*": [
+        "../geul-event-contracts/packages/proto/gen/api/common/v1/*"
+      ],
+      "@echovisionlab/geul-proto/content/*": [
+        "../geul-event-contracts/packages/proto/gen/api/content/v1/*"
+      ],
+      "@echovisionlab/geul-proto/intra/*": [
+        "../geul-event-contracts/packages/proto/gen/api/intra/v1/*"
+      ],
+      "@echovisionlab/geul-proto/public/*": [
+        "../geul-event-contracts/packages/proto/gen/api/open/v1/*"
+      ],
+      "@echovisionlab/geul-proto/secure/*": [
+        "../geul-event-contracts/packages/proto/gen/api/manage/v1/*"
+      ],
+      "@echovisionlab/geul-telemetry": ["../geul-telemetry/src/index.ts"],
+      "yjs": ["./node_modules/yjs"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "../geul-common/src/**/*.ts",
+    "../geul-event-contracts/packages/event/src/**/*.ts",
+    "../geul-event-contracts/packages/proto/gen/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
