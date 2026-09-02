@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.1.2](https://github.com/echovisionlab/geul-editor-collab/compare/v0.1.1...v0.1.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* pin Dockerfile frontend digest ([#4](https://github.com/echovisionlab/geul-editor-collab/issues/4)) ([7ef69bd](https://github.com/echovisionlab/geul-editor-collab/commit/7ef69bd9c6d3a253dda31eac7aeab86909fbdbb0))
+
 ## [0.1.1](https://github.com/echovisionlab/geul-editor-collab/compare/v0.1.0...v0.1.1) (2026-09-02)
 
 
