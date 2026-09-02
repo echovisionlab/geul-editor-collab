@@ -139,11 +139,18 @@ jobs:
             exit 1
           fi
           for image in "${SHA_IMAGE}" "${TAG_IMAGE}"; do
-            actual_digest="$(docker buildx imagetools inspect "${image}" | awk '$1 == "Digest:" { print $2; exit }')"
-            if [ "${actual_digest}" != "${EXPECTED_DIGEST}" ]; then
-              echo "${image} resolved to ${actual_digest}, expected ${EXPECTED_DIGEST}." >&2
-              exit 1
-            fi
+            actual_digest=""
+            for attempt in $(seq 1 12); do
+              if actual_digest="$(docker buildx imagetools inspect "${image}" --format '{{.Manifest.Digest}}' 2>/dev/null)" \
+                && [ "${actual_digest}" = "${EXPECTED_DIGEST}" ]; then
+                break
+              fi
+              if [ "${attempt}" -eq 12 ]; then
+                echo "${image} resolved to ${actual_digest:-unavailable}, expected ${EXPECTED_DIGEST}." >&2
+                exit 1
+              fi
+              sleep 5
+            done
           done
 
       - name: Smoke published SHA image
