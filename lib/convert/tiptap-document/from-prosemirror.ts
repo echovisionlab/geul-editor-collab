@@ -139,6 +139,7 @@ function assertBlockNode(
   }
   if (
     blockType === "codeBlock" ||
+    blockType === "mermaid" ||
     EXECUTABLE_SOURCE_BLOCK_TYPES.has(blockType)
   ) {
     assertUnmarkedTextContent(node, blockType);
@@ -211,7 +212,8 @@ function blockContentFromNode(
 ): unknown {
   if (INLINE_CONTENT_BLOCK_TYPES.has(blockType))
     return inlineContentFromNode(contentNode, schema);
-  if (blockType === "codeBlock") return plainTextContent(contentNode);
+  if (blockType === "codeBlock" || blockType === "mermaid")
+    return plainTextContent(contentNode);
   if (EXECUTABLE_SOURCE_BLOCK_TYPES.has(blockType))
     return executableSourceContentFromNode(blockType, contentNode);
   if (blockType === "shader") return shaderContentFromNode(contentNode);
