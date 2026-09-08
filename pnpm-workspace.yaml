@@ -9,6 +9,6 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - "@echovisionlab/geul-proto@0.2.0"
-  - "@echovisionlab/geul-common@0.2.0"
+  - "@echovisionlab/geul-common@0.2.1"
   - "@echovisionlab/geul-event@0.2.0"
   - "@echovisionlab/geul-telemetry@0.1.0"
