@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.2.0](https://github.com/echovisionlab/geul-editor-collab/compare/v0.1.2...v0.2.0) (2026-09-08)
+
+
+### Features
+
+* **editor:** support Mermaid collaboration and export ([#6](https://github.com/echovisionlab/geul-editor-collab/issues/6)) ([92f9766](https://github.com/echovisionlab/geul-editor-collab/commit/92f9766a3b91bfc457905584e3c240439f6be475))
+
 ## [0.1.2](https://github.com/echovisionlab/geul-editor-collab/compare/v0.1.1...v0.1.2) (2026-09-02)
 
 
