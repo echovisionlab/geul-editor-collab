@@ -73,6 +73,8 @@ const renderDocument = renderJSONContentToString({
         (node as ProseMirrorJsonNode).attrs?.language ?? "javascript";
       return `<pre${attribute("data-language", language)}><code class="bn-inline-content language-${escapeHTMLAttribute(String(language))}"${attribute("data-language", language)}>${childrenToString(children)}</code></pre>`;
     },
+    mermaid: ({ node, children }) =>
+      `<figure data-content-type="mermaid"${attribute("data-title", (node as ProseMirrorJsonNode).attrs?.title)}><pre><code class="language-mermaid">${childrenToString(children)}</code></pre></figure>`,
     p5Sketch: ({ node, children }) =>
       renderExecutable(node as ProseMirrorJsonNode, children),
     threeScene: ({ node, children }) =>

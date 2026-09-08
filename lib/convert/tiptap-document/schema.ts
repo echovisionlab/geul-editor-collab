@@ -77,6 +77,7 @@ const BLOCK_PROPS = {
   quote: QUOTE_PROPS,
   callout: CALLOUT_PROPS,
   codeBlock: { language: { default: "javascript" } },
+  mermaid: { title: { default: "" } },
   p5Sketch: {
     title: { default: "" },
     mode: { default: "edit" },
@@ -130,6 +131,7 @@ const SCHEMA_BLOCK_TYPES: Record<GeulRichTextSchema, ReadonlySet<BlockType>> = {
   bio: new Set(["paragraph", "divider"]),
   editor: new Set([
     ...BASE_BLOCK_TYPES,
+    "mermaid",
     "p5Sketch",
     "threeScene",
     "shader",
@@ -140,6 +142,7 @@ const SCHEMA_BLOCK_TYPES: Record<GeulRichTextSchema, ReadonlySet<BlockType>> = {
   email: BASE_BLOCK_TYPES,
   page: new Set([
     ...BASE_BLOCK_TYPES,
+    "mermaid",
     "p5Sketch",
     "threeScene",
     "shader",
@@ -148,6 +151,7 @@ const SCHEMA_BLOCK_TYPES: Record<GeulRichTextSchema, ReadonlySet<BlockType>> = {
   ]),
   post: new Set([
     ...BASE_BLOCK_TYPES,
+    "mermaid",
     "p5Sketch",
     "threeScene",
     "shader",
@@ -323,6 +327,7 @@ const BLOCK_ATTRIBUTE_VALIDATORS: Partial<
     textColor: isString,
   },
   codeBlock: { language: isString },
+  mermaid: { title: isString },
   p5Sketch: { ...EXECUTABLE_ATTRIBUTE_VALIDATORS, source: isString },
   threeScene: {
     ...EXECUTABLE_ATTRIBUTE_VALIDATORS,

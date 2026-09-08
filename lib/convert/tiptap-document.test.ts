@@ -1908,3 +1908,34 @@ describe("Tiptap server materialization", () => {
     });
   });
 });
+
+describe("Mermaid document conversion", () => {
+  it("round-trips source and caption through the real Yjs wire and emits escaped HTML", () => {
+    const input = [
+      {
+        id: "mermaid",
+        type: "mermaid",
+        props: { title: "<caption>" },
+        content: [
+          {
+            type: "text",
+            text: 'flowchart LR\n A["<script>"] --> B',
+            styles: {},
+          },
+        ],
+        children: [],
+      },
+    ];
+    const document = geulBlocksToProseMirrorDocument(input, "post");
+    expect(prosemirrorJsonToGeulBlocks(document, "post")).toEqual(input);
+    const room = new Y.Doc();
+    writeGeulBlocks(room, "content", input, "post");
+    expect(readGeulBlocks(room, "content", "post")).toEqual(input);
+    const html = renderGeulProseMirrorHtml(document);
+    expect(html).toContain('data-content-type="mermaid"');
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+    expect(() => geulBlocksToProseMirrorDocument(input, "email")).toThrow();
+    room.destroy();
+  });
+});

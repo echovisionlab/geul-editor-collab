@@ -81,6 +81,17 @@ function blockToProseMirrorNode(
       content: inlineContentToProseMirror(block.content, schema),
     };
   }
+  if (type === "mermaid") {
+    return {
+      type,
+      attrs,
+      content: executableSourceContentToProseMirror(
+        block.content,
+        undefined,
+        type,
+      ),
+    };
+  }
   if (type === "codeBlock") {
     return {
       type,
