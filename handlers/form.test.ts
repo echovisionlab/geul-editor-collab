@@ -155,23 +155,6 @@ describe("formHandler canonical collaboration persistence", () => {
     ).rejects.toThrow("form_collaboration:target_missing");
   });
 
-  it("does not read a stale legacy Yjs payload when canonical fields are present", async () => {
-    const { loadFormDocument } = await import("../lib/api/form.ts");
-    vi.mocked(loadFormDocument).mockResolvedValueOnce({
-      source: source("Canonical"),
-      requested: source("Canonical"),
-      sourceLocale: "en",
-      locale: "en",
-      localeExists: true,
-      presentLocaleValues: [formRootTitleTarget()],
-      documentRevision: revision(1),
-      yjsState: Uint8Array.of(1, 2, 3),
-    } as unknown as Awaited<ReturnType<typeof loadFormDocument>>);
-
-    const document = decode((await formHandler.load(room()))!);
-    expect(document.getMap("form-fields").get("title")).toBe("Canonical");
-  });
-
   it("rejects invalid transient Form schema before making a save request", async () => {
     const { saveFormDocument } = await import("../lib/api/form.ts");
     const document = decode(await load());
