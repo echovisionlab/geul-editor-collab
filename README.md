@@ -21,7 +21,7 @@ pnpm dev
 The WebSocket listener uses `PORT` (default `3003`) and the internal health and
 relay listener uses `HEALTH_PORT` (default `3004`). `SITE_ORIGIN` must exactly
 match the browser origin. `TOKEN_SIGNING_SECRET` is required for trusted
-service-to-service requests; there is no production fallback.
+service-to-service requests.
 `MANAGED_MEDIA_ORIGINS` is a comma-separated list of absolute HTTP(S) origins
 owned by the media service; managed media paths on those origins are rejected
 from collaboration state.
