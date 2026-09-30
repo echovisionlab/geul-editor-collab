@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.2.3](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.2...v0.2.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **collab:** separate mutation planning and messaging lifecycle ([#15](https://github.com/echovisionlab/geul-editor-collab/issues/15)) ([79cbd84](https://github.com/echovisionlab/geul-editor-collab/commit/79cbd84514790708724dc80ec935a3b967d9f066))
+
 ## [0.2.2](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.1...v0.2.2) (2026-09-30)
 
 
