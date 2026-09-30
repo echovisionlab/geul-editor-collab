@@ -1,4 +1,4 @@
-import { create, toJson } from "@bufbuild/protobuf";
+import { create, toBinary, toJson } from "@bufbuild/protobuf";
 import {
   PageSectionMutationBatchSchema,
   RichTextBlockGraphSchema,
@@ -7,7 +7,11 @@ import {
   RichTextProfile,
 } from "@echovisionlab/geul-proto/content/block_content_pb.ts";
 import { ApplyWorkBlockBatchResponseSchema } from "@echovisionlab/geul-proto/intra/work_pb.ts";
-import { CollaborationPrincipalSchema } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
+import {
+  CollaborationConflictDetailSchema,
+  CollaborationConflictReason,
+  CollaborationPrincipalSchema,
+} from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
 import { LoadPostBlockDocumentResponseSchema } from "@echovisionlab/geul-proto/intra/post_pb.ts";
 import {
   LoadReleaseBlockDocumentResponseSchema,
@@ -42,6 +46,19 @@ function richTextBatch() {
     expectedRevision: "revision-1",
     contributorMemberIds: ["member-1"],
   });
+}
+
+function conflictDetail(reason?: CollaborationConflictReason) {
+  const detail = create(
+    CollaborationConflictDetailSchema,
+    reason === undefined ? {} : { reason },
+  );
+  return {
+    type: "api.intra.v1.CollaborationConflictDetail",
+    value: Buffer.from(
+      toBinary(CollaborationConflictDetailSchema, detail),
+    ).toString("base64"),
+  };
 }
 
 describe("typed aggregate Block API adapters", () => {
@@ -169,13 +186,68 @@ describe("typed aggregate Block API adapters", () => {
     });
   });
 
-  it("maps Page failed_precondition through the common revision conflict decoder", async () => {
+  it.each([
+    ["without a typed detail", { code: "failed_precondition" }],
+    [
+      "with a malformed typed detail",
+      {
+        code: "failed_precondition",
+        details: [
+          {
+            type: "api.intra.v1.CollaborationConflictDetail",
+            value: "CA==",
+          },
+        ],
+      },
+    ],
+    [
+      "with an unrelated detail",
+      {
+        code: "failed_precondition",
+        details: [{ type: "other.Detail", value: "" }],
+      },
+    ],
+    [
+      "with an unspecified typed detail",
+      {
+        code: "failed_precondition",
+        details: [conflictDetail()],
+      },
+    ],
+  ])(
+    "keeps Page failed_precondition %s as a persistence rejection",
+    async (_case, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse(body, 400)),
+      );
+      const batch = create(PageSectionMutationBatchSchema, {
+        blockCatalogFingerprint: "catalog-v1",
+        expectedRevision: "revision-1",
+      });
+
+      await expect(
+        applyPageBlockBatch(ENTITY_ID, "ko", batch),
+      ).rejects.toMatchObject({
+        name: "CollaborationPersistenceRejectedError",
+        status: 400,
+        operation: "apply Page Block batch",
+      } satisfies Partial<CollaborationPersistenceRejectedError>);
+    },
+  );
+
+  it("preserves the exact reason from a typed Page conflict", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
         jsonResponse(
           {
             code: "failed_precondition",
+            details: [
+              conflictDetail(
+                CollaborationConflictReason.DOCUMENT_REVISION_CHANGED,
+              ),
+            ],
           },
           400,
         ),
@@ -189,6 +261,7 @@ describe("typed aggregate Block API adapters", () => {
     await expect(
       applyPageBlockBatch(ENTITY_ID, "ko", batch),
     ).rejects.toMatchObject({
+      name: "CollaborationConflictError",
       reason: "document_revision_changed",
     } satisfies Partial<CollaborationConflictError>);
   });

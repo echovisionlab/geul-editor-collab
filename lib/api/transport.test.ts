@@ -24,6 +24,7 @@ import {
   CollaborationConflictError,
   CollaborationMutationRejectionError,
   postInternalApi,
+  throwIfCollaborationConflictResponse,
 } from "./transport.ts";
 
 describe("internal API transport correlation", () => {
@@ -116,6 +117,47 @@ describe("internal API transport correlation", () => {
       }),
     );
   });
+
+  it.each([
+    [
+      CollaborationConflictReason.LOCALE_OWNERSHIP_CHANGED,
+      "locale_ownership_changed",
+    ],
+    [
+      CollaborationConflictReason.DOCUMENT_REVISION_CHANGED,
+      "document_revision_changed",
+    ],
+    [
+      CollaborationConflictReason.TARGET_REVISION_CHANGED,
+      "target_revision_changed",
+    ],
+  ])(
+    "preserves typed conflict %s when classifying a response directly",
+    async (reason, name) => {
+      const detail = create(CollaborationConflictDetailSchema, { reason });
+      const response = Response.json(
+        {
+          code: "failed_precondition",
+          details: [
+            {
+              type: "api.intra.v1.CollaborationConflictDetail",
+              value: Buffer.from(
+                toBinary(CollaborationConflictDetailSchema, detail),
+              ).toString("base64"),
+            },
+          ],
+        },
+        { status: 400 },
+      );
+
+      await expect(
+        throwIfCollaborationConflictResponse(response),
+      ).rejects.toMatchObject({
+        name: "CollaborationConflictError",
+        reason: name,
+      });
+    },
+  );
 
   it("turns an exact typed target mutation rejection into a bounded error", async () => {
     const detail = create(CollaborationMutationRejectionDetailSchema, {

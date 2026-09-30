@@ -538,7 +538,7 @@ describe("ResidentBlockPersistence source authority", () => {
     }
   });
 
-  it("retries an unacknowledged batch before preserving later room changes", async () => {
+  it("persists later room changes before acknowledging an unacknowledged batch retry", async () => {
     const { persistence, document, save } = fixture();
     const responseLost = new Error("response_lost");
     document.getMap("content").set("text", "First");
@@ -557,11 +557,6 @@ describe("ResidentBlockPersistence source authority", () => {
       changed: true,
       sourceChanged: true,
     });
-    await expect(
-      persistence.persist("post:post-1", document, ["member-2"]),
-    ).resolves.toMatchObject({ documentRevision: "revision-2" });
-    expect(save.mock.calls[1]?.[0]).toBe(unacknowledgedBatch);
-
     save.mockResolvedValueOnce({
       documentRevision: "revision-3",
       changed: true,
@@ -570,11 +565,34 @@ describe("ResidentBlockPersistence source authority", () => {
     await expect(
       persistence.persist("post:post-1", document, ["member-2"]),
     ).resolves.toMatchObject({ documentRevision: "revision-3" });
+    expect(save.mock.calls[1]?.[0]).toBe(unacknowledgedBatch);
     expect(save.mock.calls[2]?.[0]).toMatchObject({
       expectedDocumentRevision: "revision-2",
       contributorMemberIds: ["member-2"],
       localeMutations: [expect.objectContaining({ data: { text: "Second" } })],
     });
+  });
+
+  it("acknowledges a retry without newer changes using the original contributors", async () => {
+    const { persistence, document, save } = fixture();
+    document.getMap("content").set("text", "First");
+    persistence.recordChange("post:post-1", document, changeSet());
+    save.mockRejectedValueOnce(new Error("temporary_failure"));
+    await expect(
+      persistence.persist("post:post-1", document, ["member-1"]),
+    ).rejects.toThrow("temporary_failure");
+    save.mockResolvedValueOnce({
+      documentRevision: "revision-2",
+      changed: true,
+      sourceChanged: true,
+    });
+    await expect(
+      persistence.persist("post:post-1", document, ["member-2"]),
+    ).resolves.toMatchObject({
+      documentRevision: "revision-2",
+      contributorMemberIds: ["member-1"],
+    });
+    expect(save).toHaveBeenCalledTimes(2);
   });
 
   it("checkpoints after autosave and supports an already-acknowledged checkpoint", async () => {

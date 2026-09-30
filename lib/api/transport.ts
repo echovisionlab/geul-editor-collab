@@ -259,15 +259,15 @@ export async function hasResponseCode(
 }
 
 /**
- * Connect error serialization may omit the typed detail while still returning
- * the canonical failed_precondition code. Every document adapter maps that result
- * to the same collaboration conflict so the runtime fences Post, Page, and
- * Work identically.
+ * Only the owning API's typed conflict detail confirms a collaboration
+ * conflict. Untyped failed_precondition responses remain available to the
+ * owning adapter for its normal persistence-rejection handling.
  */
 export async function throwIfCollaborationConflictResponse(
   response: Response,
 ): Promise<void> {
-  if (await hasResponseCode(response, 400, "failed_precondition")) {
-    throw new CollaborationConflictError("document_revision_changed");
+  const reason = await readCollaborationConflictReason(response);
+  if (reason) {
+    throw new CollaborationConflictError(reason);
   }
 }
