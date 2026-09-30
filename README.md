@@ -50,6 +50,11 @@ state-vector mismatch, or typed collaboration conflict returns
 recognized `CollaborationConflictDetail` confirms a collaboration conflict;
 other `failed_precondition` responses remain persistence rejections.
 
+An explicit persistence acknowledgement covers newer accepted room changes as
+well as any retried batch from a previous failed save. Retrying the old batch
+alone must not report success while later edits remain only in the resident
+document; the newer batch is persisted under the acknowledged revision first.
+
 Authentication accepts the canonical session injected by the trusted gateway,
 checks the owning API before each inbound frame, and never persists the session
 identifier to awareness, Yjs, or collaboration logs. `VIEW` connections receive

@@ -239,11 +239,15 @@ export class ResidentBlockPersistence<TBase = unknown, TLocale = unknown> {
     if (pendingBatch) {
       const ack = await saveBatch(room, pendingBatch);
       acknowledgeSave(room, ack);
-      return persistResult(room, pendingBatch.contributorMemberIds);
+      // A retry only acknowledges its original batch. Changes accepted since
+      // that failed save must also reach storage before persist.now can ACK.
     }
     const changeSet = room.pendingChangeSet;
     if (!changeSet) {
-      return persistResult(room, contributorMemberIds);
+      return persistResult(
+        room,
+        pendingBatch?.contributorMemberIds ?? contributorMemberIds,
+      );
     }
     const mutationContributorMemberIds = requireSaveContributorMemberIds({
       contributorMemberIds: [...contributorMemberIds],
