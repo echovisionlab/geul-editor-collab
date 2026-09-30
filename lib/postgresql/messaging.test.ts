@@ -600,6 +600,44 @@ describe("PostgreSQL messaging runtime", () => {
     await messaging.stopMessaging(1_000);
   });
 
+  it("keeps signal delivery ordered and drains active handlers during shared shutdown", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const firstHandler = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const handle = vi
+      .fn<(...arguments_: [Uint8Array, typeof envelope]) => Promise<void>>()
+      .mockReturnValueOnce(firstHandler)
+      .mockResolvedValueOnce(undefined);
+    const messaging = await loadMessaging();
+    await messaging.startSignalSubscriber("signal", handle);
+
+    mocks.notification?.({
+      channel: "signal",
+      payload: JSON.stringify(envelope),
+    });
+    mocks.notification?.({
+      channel: "signal",
+      payload: JSON.stringify(envelope),
+    });
+    await vi.waitFor(() => expect(handle).toHaveBeenCalledOnce());
+
+    let drained = false;
+    const firstStop = messaging.stopMessagingConsumers(1_000);
+    const stopping = firstStop.then(() => {
+      drained = true;
+    });
+    expect(messaging.stopMessagingConsumers(1_000)).toBe(firstStop);
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    releaseFirst?.();
+    await stopping;
+    expect(handle).toHaveBeenCalledTimes(2);
+    expect(drained).toBe(true);
+    await messaging.closeMessaging();
+  });
+
   it("surfaces an unexpected listener end through the tracked fatal task", async () => {
     const queued = vi.fn();
     vi.stubGlobal("queueMicrotask", queued);

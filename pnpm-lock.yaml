@@ -17,8 +17,8 @@ importers:
         specifier: ^2.1.2
         version: 2.1.2(@bufbuild/protobuf@2.14.0)(@connectrpc/connect@2.1.2(@bufbuild/protobuf@2.14.0))
       "@echovisionlab/geul-common":
-        specifier: 0.2.3
-        version: 0.2.3(yjs@13.6.32)
+        specifier: 0.2.4
+        version: 0.2.4(yjs@13.6.32)
       "@echovisionlab/geul-event":
         specifier: 0.2.1
         version: 0.2.1(@echovisionlab/geul-proto@0.2.1)
@@ -26,8 +26,8 @@ importers:
         specifier: 0.2.1
         version: 0.2.1
       "@echovisionlab/geul-telemetry":
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.1.3
+        version: 0.1.3
       "@hocuspocus/server":
         specifier: ^4.6.0
         version: 4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
@@ -271,10 +271,10 @@ packages:
       }
     engines: { node: ">=20.19.0" }
 
-  "@echovisionlab/geul-common@0.2.3":
+  "@echovisionlab/geul-common@0.2.4":
     resolution:
       {
-        integrity: sha512-wTFGwUHTQKZdett/BgcGNmdhanf8S0guhAAwamjyZJSre5peJRA8gIEFVkuZ15ceABeNxdIsR2fPPeZBBK9cJw==,
+        integrity: sha512-ndiJnibfjc14nhdJ0QGlsDKHYmJ1YvD6XROzW3qrfGK2w8y0U6Om94BozVijDIvbGKxNT9E2AO2he6dmSyWc+w==,
       }
     engines: { node: 24.19.0 }
     peerDependencies:
@@ -294,10 +294,10 @@ packages:
         integrity: sha512-c86rtFJ1PMlH/cD/tNd4jetqc8Tk5eU3LHafNAhPZPWGemXmYGln5rko4MS3fHLLLFy3AuSrKjdea0SmX5RhOg==,
       }
 
-  "@echovisionlab/geul-telemetry@0.1.0":
+  "@echovisionlab/geul-telemetry@0.1.3":
     resolution:
       {
-        integrity: sha512-qrlxOZdMj12WaBocoKppmnKwj9iaJ+kQ4W1dGpYu5EITPSbadSlv+C5bLzLWeg9XrqAv4E+DiGkQTG1UTJibUg==,
+        integrity: sha512-nK2ZSM7T+3pthM/PiW7tD6dwDZCeRZDJ8E4V3COBrRqgUuYTJmlh2UkGzKKVCr5e0FcW7fM5Lq14pgAwbc5oKg==,
       }
     engines: { node: 24.19.0 }
 
@@ -5465,7 +5465,7 @@ snapshots:
 
   "@csstools/css-tokenizer@4.0.0": {}
 
-  "@echovisionlab/geul-common@0.2.3(yjs@13.6.32)":
+  "@echovisionlab/geul-common@0.2.4(yjs@13.6.32)":
     dependencies:
       "@bufbuild/protobuf": 2.14.0
       "@echovisionlab/geul-proto": 0.2.1
@@ -5481,7 +5481,7 @@ snapshots:
     dependencies:
       "@bufbuild/protobuf": 2.14.0
 
-  "@echovisionlab/geul-telemetry@0.1.0":
+  "@echovisionlab/geul-telemetry@0.1.3":
     dependencies:
       "@opentelemetry/api": 1.9.1
 

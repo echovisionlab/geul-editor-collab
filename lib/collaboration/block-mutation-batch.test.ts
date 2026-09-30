@@ -4,6 +4,7 @@ import {
   type CanonicalBlock,
   type CanonicalBlockDocument,
 } from "./block-mutation-batch.ts";
+import { planLocaleMutations } from "./block-mutation-plans.ts";
 
 const BLOCK_ID = "11111111-1111-4111-8111-111111111111";
 const CHILD_ID = "22222222-2222-4222-8222-222222222222";
@@ -177,6 +178,26 @@ describe("BlockMutationBaseline", () => {
     ).toThrow("block_document_locale_changed");
   });
 
+  it("omits an absent optional block catalog profile", () => {
+    const document = snapshot();
+    delete document.profile;
+    const baseline = new BlockMutationBaseline(document, "revision-1");
+
+    expect(baseline.prepareFull(document, []).profile).toBeUndefined();
+  });
+
+  it("does not plan locale mutations for a kind change whose block disappeared", () => {
+    expect(
+      planLocaleMutations({
+        affectedBaseBlockIds: [OTHER_ID],
+        affectedLocaleBlockIds: [],
+        changedKindBlockIds: new Set([OTHER_ID]),
+        currentBlocks: new Map(),
+        previousBlocks: new Map(),
+      }),
+    ).toEqual([]);
+  });
+
   it("emits source deletion and advances only after acknowledgement", () => {
     const baseline = new BlockMutationBaseline(snapshot(), "revision-1");
     const batch = baseline.prepareFull(
@@ -256,6 +277,8 @@ describe("BlockMutationBaseline", () => {
       snapshot([block({ baseData: { alignment: "center" } })]),
       ["member-a"],
     );
+    expect(baseline.target).toBeUndefined();
+    expect(baseline.pendingBatch).toBe(first);
     expect(
       baseline.prepareFull(
         snapshot([block({ baseData: { alignment: "right" } })]),
@@ -275,6 +298,21 @@ describe("BlockMutationBaseline", () => {
       sourceChanged: false,
     });
     expect(baseline.revision).toBe("revision-2");
+    expect(baseline.pendingBatch).toBeUndefined();
+  });
+
+  it("accepts an authoritative target revision advance", () => {
+    const targetSnapshot = { ...snapshot(), sourceLocale: "ko", locale: "en" };
+    const baseline = new BlockMutationBaseline(
+      targetSnapshot,
+      "revision-1",
+      "target-1",
+    );
+    expect(baseline.target).toBe("target-1");
+
+    baseline.advanceTargetRevision("target-2");
+
+    expect(baseline.target).toBe("target-2");
   });
 
   it("treats array order as irrelevant when structural positions are unchanged", () => {
@@ -487,6 +525,46 @@ describe("BlockMutationBaseline", () => {
     expect(() =>
       baseline.prepareFull(snapshot([block({ position: 1 })]), []),
     ).toThrow("block_mutation_target_structure_forbidden");
+  });
+
+  it("requires a target revision before creating a locale mutation", () => {
+    const targetSnapshot = { ...snapshot(), sourceLocale: "ko", locale: "en" };
+    const baseline = new BlockMutationBaseline(targetSnapshot, "r1");
+
+    expect(() =>
+      baseline.prepareFull(
+        {
+          ...targetSnapshot,
+          blocks: [block({ localeData: { text: "Translated" } })],
+        },
+        [],
+      ),
+    ).toThrow("block_mutation_missing_target_revision");
+  });
+
+  it("compares nested JSON objects independent of key order and preserves array order", () => {
+    const baseline = new BlockMutationBaseline(
+      snapshot([
+        block({ baseData: { enabled: true, values: [1, { b: 2, a: 1 }] } }),
+      ]),
+      "r1",
+    );
+    expect(
+      baseline.prepareFull(
+        snapshot([
+          block({ baseData: { values: [1, { a: 1, b: 2 }], enabled: true } }),
+        ]),
+        [],
+      ).baseMutations,
+    ).toEqual([]);
+    expect(
+      baseline.prepareFull(
+        snapshot([
+          block({ baseData: { values: [{ a: 1, b: 2 }, 1], enabled: true } }),
+        ]),
+        [],
+      ).baseMutations,
+    ).toHaveLength(1);
   });
 
   it("canonicalizes finite numeric changes and applies acknowledged base deletion", () => {

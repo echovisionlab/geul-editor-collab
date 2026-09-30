@@ -96,3 +96,23 @@ release tag it publishes the exact release SHA and version tags for
 cluster.
 
 See [LICENSE](LICENSE) for the PolyForm Noncommercial 1.0.0 terms.
+
+## Mutation and messaging ownership
+
+`block-mutation-plans.ts` computes ordered block and locale operations without
+performing I/O. The batch owner retains revision checks, pending state and the
+atomic API acknowledgement. `resident-block-load.ts` shares load projection;
+Post, Page and Work gateways retain their domain-specific persistence rules.
+
+The PostgreSQL messaging facade delegates queue policy, signal subscriptions
+and runtime ownership to private modules. Runtime shutdown drains tracked signal
+handlers and queue tasks before closing the pool, within the existing deadline.
+Abortable delays remove their listener both on normal completion and cancellation.
+
+A controlled before/after comparison on 2026-10-01 used Node 24.19.0 and 200
+sequential 1 ms waits against the same AbortSignal. The previous delay retained
+200 abort listeners before shutdown; the replacement retained zero. Both had
+zero after shutdown. This measures listener retention, not production RSS or
+throughput. Timer completion, cancellation, already-aborted signals and the
+registration race are covered by `messaging-delay.test.ts`; shutdown draining is
+covered by `messaging.test.ts`.

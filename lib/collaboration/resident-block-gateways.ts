@@ -4,7 +4,6 @@ import type {
 } from "@echovisionlab/geul-common/collaboration/block-room-codec";
 import type { DocumentLayout } from "@echovisionlab/geul-proto/common/common_pb.ts";
 import type { CollaborationPrincipal } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
-import type { AIDocumentFieldTarget } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
 import {
   applyPageBlockBatch,
   createPageVersionCheckpoint,
@@ -19,7 +18,6 @@ import {
 import {
   applyResidentRichTextBlockBatch,
   loadResidentRichTextDocument,
-  type ResidentSourceMetadataProjection,
   type ResidentRichTextDocumentType,
 } from "../api/resident-block-domain.ts";
 import {
@@ -31,6 +29,10 @@ import type {
   BlockMutationAck,
   BlockMutationBatch,
 } from "./block-mutation-batch.ts";
+import {
+  normalizeResidentBlockLoad,
+  type ResidentBlockDomainLoad,
+} from "./resident-block-load.ts";
 import {
   createPageMutationBatch,
   createRichTextMutationBatch,
@@ -44,17 +46,7 @@ import {
 import type { ResidentBlockCheckpointRequest } from "./resident-block-persistence.ts";
 import { projectSourceMetadata } from "../api/resident-block-load.ts";
 
-export interface ResidentBlockDomainLoad {
-  document: BlockRoomTypedDocument;
-  documentRevision: string;
-  locale: string;
-  sourceLocale: string;
-  localeExists: boolean;
-  targetRevision?: string;
-  presentLocaleValues: readonly AIDocumentFieldTarget[];
-  sourceMetadata: ResidentSourceMetadataProjection;
-  localeMetadata?: ResidentSourceMetadataProjection;
-}
+export type { ResidentBlockDomainLoad } from "./resident-block-load.ts";
 
 type RoomBatch = BlockMutationBatch<unknown, BlockRoomLocaleData>;
 
@@ -114,81 +106,6 @@ function requireRequestedLocale(actual: string, locale: string): void {
   }
 }
 
-function requireMetadata(
-  value: ResidentSourceMetadataProjection | undefined,
-  reason: string,
-): ResidentSourceMetadataProjection {
-  if (!value?.locale) throw new Error(reason);
-  return value;
-}
-
-function sameMetadata(
-  left: ResidentSourceMetadataProjection,
-  right: ResidentSourceMetadataProjection,
-): boolean {
-  if (
-    left.locale !== right.locale ||
-    left.title !== right.title ||
-    left.summary !== right.summary ||
-    left.subject !== right.subject
-  ) {
-    return false;
-  }
-  const leftNotes = left.creditNotes ?? [];
-  const rightNotes = right.creditNotes ?? [];
-  return (
-    leftNotes.length === rightNotes.length &&
-    leftNotes.every(
-      (note, index) =>
-        note.creditId === rightNotes[index]?.creditId &&
-        note.note === rightNotes[index]?.note,
-    )
-  );
-}
-
-function assertTargetLocaleAuthority(input: {
-  localeExists: boolean;
-  targetRevision?: string;
-}): void {
-  if (input.localeExists !== Boolean(input.targetRevision?.trim())) {
-    throw new Error("block_target_revision_presence_mismatch");
-  }
-}
-
-function assertLocaleLoadAuthority(input: {
-  locale: string;
-  sourceMetadata: ResidentSourceMetadataProjection;
-  localeExists: boolean;
-  localeMetadata?: ResidentSourceMetadataProjection;
-  targetRevision?: string;
-}): void {
-  const isSource = input.locale === input.sourceMetadata.locale;
-  if (input.localeExists !== (input.localeMetadata !== undefined)) {
-    throw new Error("block_locale_metadata_presence_mismatch");
-  }
-  if (input.localeMetadata && input.localeMetadata.locale !== input.locale) {
-    throw new Error("block_locale_metadata_locale_mismatch");
-  }
-  if (!isSource) {
-    assertTargetLocaleAuthority(input);
-    return;
-  }
-  if (!input.localeExists || input.targetRevision !== undefined) {
-    throw new Error("block_source_locale_authority_invalid");
-  }
-  if (
-    !sameMetadata(
-      requireMetadata(
-        input.localeMetadata,
-        "block_source_locale_metadata_mismatch",
-      ),
-      input.sourceMetadata,
-    )
-  ) {
-    throw new Error("block_source_locale_metadata_mismatch");
-  }
-}
-
 function richTextAck(response: {
   documentRevision: string;
   changed: boolean;
@@ -218,28 +135,16 @@ function residentRichTextGateway(
         locale,
         principal,
       );
-      requireRequestedLocale(response.locale, locale);
-      const sourceMetadata = requireMetadata(
-        response.sourceMetadata,
-        `block_source_metadata_missing:${documentType}`,
-      );
-      const loaded = {
+      return normalizeResidentBlockLoad({
         document: response.document,
-        documentRevision: response.documentRevision,
-        locale: response.locale,
-        sourceLocale: sourceMetadata.locale,
-        localeExists: response.localeExists,
-        presentLocaleValues: response.presentLocaleValues,
-        ...(response.targetRevision === undefined
-          ? {}
-          : { targetRevision: response.targetRevision }),
-        sourceMetadata,
+        response,
+        requestedLocale: locale,
+        sourceMetadata: response.sourceMetadata,
         ...(response.localeMetadata === undefined
           ? {}
           : { localeMetadata: response.localeMetadata }),
-      };
-      assertLocaleLoadAuthority(loaded);
-      return loaded;
+        sourceMetadataMissingReason: `block_source_metadata_missing:${documentType}`,
+      });
     },
     async save(entityId, locale, batch) {
       const response = await applyResidentRichTextBlockBatch(
@@ -262,28 +167,16 @@ function postGateway(): ResidentBlockDomainGateway {
     async load(entityId, locale, principal) {
       const response = await loadPostBlockDocument(entityId, locale, principal);
       const document = requireDocument(response.document, "post");
-      requireRequestedLocale(response.locale, locale);
-      const sourceMetadata = requireMetadata(
-        projectSourceMetadata(response.sourceMetadata),
-        "block_source_metadata_missing:post",
-      );
-      const loaded = {
+      return normalizeResidentBlockLoad({
         document,
-        documentRevision: response.documentRevision,
-        locale: response.locale,
-        sourceLocale: sourceMetadata.locale,
-        localeExists: response.localeExists,
-        presentLocaleValues: response.presentLocaleValues,
-        ...(response.targetRevision === undefined
-          ? {}
-          : { targetRevision: response.targetRevision }),
-        sourceMetadata,
+        response,
+        requestedLocale: locale,
+        sourceMetadata: projectSourceMetadata(response.sourceMetadata),
         ...(response.localeMetadata === undefined
           ? {}
           : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),
-      };
-      assertLocaleLoadAuthority(loaded);
-      return loaded;
+        sourceMetadataMissingReason: "block_source_metadata_missing:post",
+      });
     },
     async save(entityId, locale, batch) {
       const response = await applyPostBlockBatch(
@@ -315,28 +208,16 @@ function pageGateway(): ResidentBlockDomainGateway {
     async load(entityId, locale, principal) {
       const response = await loadPageBlockDocument(entityId, locale, principal);
       const document = requireDocument(response.document, "page");
-      requireRequestedLocale(response.locale, locale);
-      const sourceMetadata = requireMetadata(
-        projectSourceMetadata(response.sourceMetadata),
-        "block_source_metadata_missing:page",
-      );
-      const loaded = {
+      return normalizeResidentBlockLoad({
         document,
-        documentRevision: response.documentRevision,
-        locale: response.locale,
-        sourceLocale: sourceMetadata.locale,
-        localeExists: response.localeExists,
-        presentLocaleValues: response.presentLocaleValues,
-        ...(response.targetRevision === undefined
-          ? {}
-          : { targetRevision: response.targetRevision }),
-        sourceMetadata,
+        response,
+        requestedLocale: locale,
+        sourceMetadata: projectSourceMetadata(response.sourceMetadata),
         ...(response.localeMetadata === undefined
           ? {}
           : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),
-      };
-      assertLocaleLoadAuthority(loaded);
-      return loaded;
+        sourceMetadataMissingReason: "block_source_metadata_missing:page",
+      });
     },
     async save(entityId, locale, batch) {
       const response = await applyPageBlockBatch(
@@ -385,28 +266,16 @@ function workGateway(): ResidentBlockDomainGateway {
     async load(entityId, locale, principal) {
       const response = await loadWorkBlockDocument(entityId, locale, principal);
       const document = requireDocument(response.document, "work");
-      requireRequestedLocale(response.locale, locale);
-      const sourceMetadata = requireMetadata(
-        projectSourceMetadata(response.sourceMetadata),
-        "block_source_metadata_missing:work",
-      );
-      const loaded = {
+      return normalizeResidentBlockLoad({
         document,
-        documentRevision: response.documentRevision,
-        locale: response.locale,
-        sourceLocale: sourceMetadata.locale,
-        localeExists: response.localeExists,
-        presentLocaleValues: response.presentLocaleValues,
-        ...(response.targetRevision === undefined
-          ? {}
-          : { targetRevision: response.targetRevision }),
-        sourceMetadata,
+        response,
+        requestedLocale: locale,
+        sourceMetadata: projectSourceMetadata(response.sourceMetadata),
         ...(response.localeMetadata === undefined
           ? {}
           : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),
-      };
-      assertLocaleLoadAuthority(loaded);
-      return loaded;
+        sourceMetadataMissingReason: "block_source_metadata_missing:work",
+      });
     },
     async save(entityId, locale, batch) {
       const response = await applyWorkBlockBatch(

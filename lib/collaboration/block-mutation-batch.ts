@@ -1,4 +1,8 @@
 import type { AIDocumentFieldTarget } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
+import {
+  planBasePlacementMutations,
+  planLocaleMutations,
+} from "./block-mutation-plans.ts";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -141,66 +145,6 @@ function applyAcknowledgedLocaleChanges<TBase, TLocale>(
   }
 }
 
-function nextAncestors(
-  value: object,
-  ancestors: ReadonlySet<object>,
-): Set<object> {
-  if (ancestors.has(value)) throw new Error("block_document_cyclic_json");
-  return new Set(ancestors).add(value);
-}
-
-function canonicalNumber(value: number): string {
-  if (!Number.isFinite(value))
-    throw new Error("block_document_non_finite_number");
-  return JSON.stringify(value);
-}
-
-function canonicalJson(
-  value: unknown,
-  ancestors: ReadonlySet<object> = new Set(),
-): string {
-  if (value === null || typeof value === "string" || typeof value === "boolean")
-    return JSON.stringify(value);
-  if (typeof value === "number") return canonicalNumber(value);
-  if (Array.isArray(value)) {
-    const next = nextAncestors(value, ancestors);
-    return `[${value.map((item) => canonicalJson(item, next)).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    const next = nextAncestors(value, ancestors);
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(
-        ([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item, next)}`,
-      )
-      .join(",")}}`;
-  }
-  throw new Error("block_document_non_json_value");
-}
-
-function equal(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (left === undefined || right === undefined) return false;
-  return canonicalJson(left) === canonicalJson(right);
-}
-
-const BASE_MUTATION_ORDER: Record<BaseBlockMutation["operation"], number> = {
-  move: 0,
-  upsert: 1,
-  delete: 2,
-};
-
-function mutationContext<TBase, TLocale>(
-  block: CanonicalBlock<TBase, TLocale>,
-) {
-  return {
-    kind: block.kind,
-    ...(block.adapterData === undefined
-      ? {}
-      : { adapterData: block.adapterData }),
-  };
-}
-
 function assertBlockIdentity(block: CanonicalBlock): void {
   if (!UUID_PATTERN.test(block.blockId))
     throw new Error(`block_document_invalid_block_id:${block.blockId}`);
@@ -248,45 +192,6 @@ function initialBlocks<TBase, TLocale>(
   };
   for (const blockId of blocks.keys()) visit(blockId, new Set());
   return blocks;
-}
-
-function upsertBase<TBase, TLocale>(
-  block: CanonicalBlock<TBase, TLocale>,
-): UpsertBaseBlock<TBase> {
-  return {
-    operation: "upsert",
-    block: {
-      blockId: block.blockId,
-      parentBlockId: block.parentBlockId,
-      containerSlot: block.containerSlot,
-      position: block.position,
-      baseData: block.baseData,
-      ...mutationContext(block),
-    },
-  };
-}
-
-function localeMutation<TBase, TLocale>(
-  block: CanonicalBlock<TBase, TLocale>,
-  data: TLocale | undefined,
-): LocaleBlockMutation<TLocale> {
-  return data === undefined
-    ? { operation: "delete", blockId: block.blockId, ...mutationContext(block) }
-    : {
-        operation: "upsert",
-        blockId: block.blockId,
-        data,
-        ...mutationContext(block),
-      };
-}
-
-function deleteBaseMutation<TBase, TLocale>(
-  blockId: string,
-  previous: CanonicalBlock<TBase, TLocale> | undefined,
-): DeleteBaseBlock | undefined {
-  return previous
-    ? { operation: "delete", blockId, ...mutationContext(previous) }
-    : undefined;
 }
 
 export class BlockMutationBaseline<TBase = unknown, TLocale = unknown> {
@@ -374,56 +279,20 @@ export class BlockMutationBaseline<TBase = unknown, TLocale = unknown> {
         return [block.blockId, block];
       }),
     );
-    const baseMutations: BaseBlockMutation<TBase>[] = [];
-    const localeMutations: LocaleBlockMutation<TLocale>[] = [];
-    const affectedBase = new Set(changes.affectedBaseBlockIds);
-    for (const blockId of affectedBase) {
-      const block = current.get(blockId);
-      const previous = this.blocks.get(blockId);
-      if (!block) {
-        const deletion = deleteBaseMutation(blockId, previous);
-        baseMutations.push(...(deletion ? [deletion] : []));
-        continue;
-      }
-      const baseChanged =
-        !previous ||
-        previous.kind !== block.kind ||
-        !equal(previous.baseData, block.baseData);
-      const placementChanged =
-        previous &&
-        (previous.parentBlockId !== block.parentBlockId ||
-          previous.containerSlot !== block.containerSlot ||
-          previous.position !== block.position);
-      if (baseChanged) baseMutations.push(upsertBase(block));
-      else if (placementChanged) {
-        baseMutations.push({
-          operation: "move",
-          blockId,
-          parentBlockId: block.parentBlockId,
-          containerSlot: block.containerSlot,
-          position: block.position,
-          ...mutationContext(block),
-        });
-      }
-      if (
-        (!previous || previous.kind !== block.kind) &&
-        (block.localeData !== undefined || previous?.localeData !== undefined)
-      ) {
-        localeMutations.push(localeMutation(block, block.localeData));
-      }
-    }
-    for (const blockId of new Set(changes.affectedLocaleBlockIds)) {
-      if (
-        affectedBase.has(blockId) &&
-        this.blocks.get(blockId)?.kind !== current.get(blockId)?.kind
-      )
-        continue;
-      const block = current.get(blockId);
-      const previous = this.blocks.get(blockId);
-      if (!block || !previous) continue;
-      if (!equal(previous.localeData, block.localeData))
-        localeMutations.push(localeMutation(block, block.localeData));
-    }
+    const affectedBaseBlockIds = [...new Set(changes.affectedBaseBlockIds)];
+    const basePlan = planBasePlacementMutations({
+      affectedBlockIds: affectedBaseBlockIds,
+      currentBlocks: current,
+      previousBlocks: this.blocks,
+    });
+    const baseMutations = basePlan.mutations;
+    const localeMutations = planLocaleMutations({
+      affectedBaseBlockIds,
+      affectedLocaleBlockIds: changes.affectedLocaleBlockIds,
+      changedKindBlockIds: basePlan.changedKindBlockIds,
+      currentBlocks: current,
+      previousBlocks: this.blocks,
+    });
     const batch: BlockMutationBatch<TBase, TLocale> = {
       expectedDocumentRevision: this.documentRevision,
       ...(this.targetRevision === undefined
@@ -431,15 +300,9 @@ export class BlockMutationBaseline<TBase = unknown, TLocale = unknown> {
         : { expectedTargetRevision: this.targetRevision }),
       blockCatalogFingerprint: this.document.blockCatalogFingerprint,
       profile: this.document.profile,
-      baseMutations: baseMutations.sort(
-        (left, right) =>
-          BASE_MUTATION_ORDER[left.operation] -
-          BASE_MUTATION_ORDER[right.operation],
-      ),
+      baseMutations,
       locale: this.document.locale,
-      localeMutations: localeMutations.sort((left, right) =>
-        left.blockId.localeCompare(right.blockId),
-      ),
+      localeMutations,
       affectedLocaleValueTargets: [
         ...(changes.affectedLocaleValueTargets ?? []),
       ],
