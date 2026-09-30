@@ -45,8 +45,10 @@ Room names, WebSocket framing, generated protobuf JSON, Yjs bootstrap/update
 semantics, revision and hash tokens, document layout keys, and durable database
 fields remain compatible with the editor and owning APIs. Yjs is transient
 collaboration state; the owning API remains the durable authority. A restart,
-state-vector mismatch, or revision conflict returns `reload_required` and the
-client must bootstrap a fresh document.
+state-vector mismatch, or typed collaboration conflict returns
+`reload_required` and the client must bootstrap a fresh document. Only a
+recognized `CollaborationConflictDetail` confirms a collaboration conflict;
+other `failed_precondition` responses remain persistence rejections.
 
 Authentication accepts the canonical session injected by the trusted gateway,
 checks the owning API before each inbound frame, and never persists the session
