@@ -2,6 +2,14 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.2.2](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.1...v0.2.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* preserve concurrent inline edits through protocol v2 ([f9f629a](https://github.com/echovisionlab/geul-editor-collab/commit/f9f629a27025961f32a1870fe84f80cc7ee50de1))
+* preserve concurrent inline edits through protocol v2 ([3ce11f3](https://github.com/echovisionlab/geul-editor-collab/commit/3ce11f334f89828ffde017f9b83b296ab1f2f5fa))
+
 ## [0.2.1](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.0...v0.2.1) (2026-09-30)
 
 
