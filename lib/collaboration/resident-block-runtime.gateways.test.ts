@@ -284,6 +284,17 @@ describe("ResidentBlockRuntime domain gateways", () => {
     ).rejects.toThrow("block_document_locale_mismatch:en");
   });
 
+  it("rejects a save ACK whose locale differs from the requested room", async () => {
+    api.applyPostBlockBatch.mockResolvedValueOnce({
+      ...sourceAck(),
+      locale: "en",
+    });
+
+    await expect(
+      runtimeGateways().post.save(ENTITY_ID, "ko", batch(RichTextProfile.POST)),
+    ).rejects.toThrow("block_document_locale_mismatch:ko");
+  });
+
   it("preserves an opaque target revision through load, save, and ACK", async () => {
     const targetRevision = "tr1_ZXhhY3Qtb3BhcXVlLXRva2Vu";
     api.loadPostBlockDocument.mockResolvedValue({
