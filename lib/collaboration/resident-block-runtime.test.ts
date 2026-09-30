@@ -1,10 +1,12 @@
-import { create, fromJson } from "@bufbuild/protobuf";
+import { create, fromJson, toJson } from "@bufbuild/protobuf";
+import type { JsonValue } from "@bufbuild/protobuf";
 import {
   deleteBlockRoomBaseNode,
   getBlockRoomCollaborativeText,
   hydrateCanonicalBlockRoom,
   movePageSectionNode,
   moveRichTextBlockNode,
+  reconcileBlockRoomInlineContent,
   replaceBlockRoomPayloadArray,
 } from "@echovisionlab/geul-common/collaboration/block-room-codec";
 import { CollaborativeDocumentType } from "@echovisionlab/geul-common/collaboration/document";
@@ -14,6 +16,7 @@ import {
   RichTextProfile,
   LocalizedPageDocumentSchema,
 } from "@echovisionlab/geul-proto/content/block_content_pb.ts";
+import type { LocalizedRichTextDocument } from "@echovisionlab/geul-proto/content/block_content_pb.ts";
 import {
   DocumentContentHeight,
   DocumentLayoutSchema,
@@ -79,7 +82,7 @@ const PRINCIPAL = create(CollaborationPrincipalSchema, {
   sessionId: "33333333-3333-4333-8333-333333333333",
 });
 
-function sourceDocument(profile = RichTextProfile.POST) {
+function sourceDocument(profile = RichTextProfile.POST, text = "기존") {
   return fromJson(LocalizedRichTextDocumentSchema, {
     blockCatalogFingerprint: contentBlockCatalogFingerprint,
     profile,
@@ -97,7 +100,7 @@ function sourceDocument(profile = RichTextProfile.POST) {
       blocks: [
         {
           blockId: BLOCK_ID,
-          paragraph: { content: [{ text: { text: "기존" } }] },
+          paragraph: { content: [{ text: { text } }] },
         },
       ],
     },
@@ -643,6 +646,107 @@ describe("ResidentBlockRuntime source room", () => {
       expectedDocumentRevision: "revision-2",
       contributorMemberIds: ["member-1"],
     });
+  });
+
+  it("preserves concurrent inline typing and marks through server projection and persistence", async () => {
+    const save = vi.fn().mockResolvedValue({
+      documentRevision: "revision-2",
+      changed: true,
+      sourceChanged: true,
+      locale: "ko",
+    });
+    const domain = gateway({
+      load: vi
+        .fn()
+        .mockResolvedValue(
+          loadedDocument(sourceDocument(RichTextProfile.POST, "abcdef")),
+        ),
+      save,
+    });
+    const runtime = new ResidentBlockRuntime({ post: domain });
+    const room = new Y.Doc();
+    await runtime.load(DOCUMENT_NAME, room, PRINCIPAL);
+
+    const previous = [{ text: { text: "abcdef" } }] as JsonValue[];
+    const next = [
+      { text: { text: "ab" } },
+      { text: { text: "cd", styles: { bold: true } } },
+      { text: { text: "ef" } },
+    ] as JsonValue[];
+    const inlineRef = {
+      family: "rich_text" as const,
+      id: BLOCK_ID,
+      locale: true as const,
+      path: "content",
+    };
+    const formattingPeer = new Y.Doc();
+    const typingPeer = new Y.Doc();
+    const initialUpdate = Y.encodeStateAsUpdate(room);
+    Y.applyUpdate(formattingPeer, initialUpdate);
+    Y.applyUpdate(typingPeer, initialUpdate);
+    const formattingVector = Y.encodeStateVector(formattingPeer);
+    const typingVector = Y.encodeStateVector(typingPeer);
+
+    reconcileBlockRoomInlineContent(formattingPeer, inlineRef, previous, next);
+    getBlockRoomCollaborativeText(typingPeer, {
+      ...inlineRef,
+      path: "content[0].text.text",
+    }).insert(0, "remote-");
+
+    Y.applyUpdate(
+      formattingPeer,
+      Y.encodeStateAsUpdate(typingPeer, formattingVector),
+    );
+    Y.applyUpdate(
+      typingPeer,
+      Y.encodeStateAsUpdate(formattingPeer, typingVector),
+    );
+    Y.applyUpdate(
+      room,
+      Y.encodeStateAsUpdate(formattingPeer, Y.encodeStateVector(room)),
+    );
+
+    const expectedContent = [
+      { text: { text: "remote-ab" } },
+      { text: { text: "cd", styles: { bold: true } } },
+      { text: { text: "ef" } },
+    ];
+    expect(
+      getBlockRoomCollaborativeText(room, {
+        ...inlineRef,
+        path: "content[0].text.text",
+      }).toString(),
+    ).toBe("remote-abcdef");
+
+    const bootstrap = runtime.bootstrap(DOCUMENT_NAME, room);
+    const projected = toJson(
+      LocalizedRichTextDocumentSchema,
+      bootstrap.document as LocalizedRichTextDocument,
+    ) as {
+      localeOverlay?: {
+        blocks?: Array<{ paragraph?: { content?: unknown[] } }>;
+      };
+    };
+    expect(projected.localeOverlay?.blocks?.[0]?.paragraph?.content).toEqual(
+      expectedContent,
+    );
+
+    await runtime.persist(DOCUMENT_NAME, room, ["member-1"]);
+    expect(save).toHaveBeenCalledWith(
+      ENTITY_ID,
+      "ko",
+      expect.objectContaining({
+        localeMutations: [
+          expect.objectContaining({
+            blockId: BLOCK_ID,
+            data: {
+              kind: "paragraph",
+              payload: { content: expectedContent },
+            },
+          }),
+        ],
+      }),
+    );
   });
 
   it.each([

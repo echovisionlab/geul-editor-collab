@@ -22,7 +22,7 @@ import {
   RoomEpochMismatchError,
 } from "./room-epoch.ts";
 
-const BLOCK_ROOM_PROTOCOL_VERSION = 1;
+const BLOCK_ROOM_PROTOCOL_VERSION = 2;
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -42,14 +42,14 @@ const { stateVector: EMPTY_STATE_VECTOR, update: EMPTY_UPDATE } = (() => {
 
 export interface BootstrapAckMessage {
   kind: "block_room.bootstrap_ack";
-  protocolVersion: 1;
+  protocolVersion: 2;
   challenge: string;
   stateVector: string;
 }
 
 export interface MetadataMessage {
   kind: "block_room.metadata";
-  protocolVersion: 1;
+  protocolVersion: 2;
   requestId: string;
   operation: "locale" | "document" | "page_layout";
   payload: JsonValue;
@@ -57,7 +57,7 @@ export interface MetadataMessage {
 
 export interface SnapshotMessage {
   kind: "block_room.snapshot";
-  protocolVersion: 1;
+  protocolVersion: 2;
   requestId: string;
 }
 

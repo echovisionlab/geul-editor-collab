@@ -50,6 +50,11 @@ state-vector mismatch, or typed collaboration conflict returns
 recognized `CollaborationConflictDetail` confirms a collaboration conflict;
 other `failed_precondition` responses remain persistence rejections.
 
+Rich-text collaboration uses WebSocket protocol version 2 for shared `Y.Text`
+format attributes. Deploy Collab before the Web writer so version 1 clients are
+rejected before room admission; the canonical storage and protobuf schema
+versions remain unchanged.
+
 An explicit persistence acknowledgement covers newer accepted room changes as
 well as any retried batch from a previous failed save. Retrying the old batch
 alone must not report success while later edits remain only in the resident

@@ -216,7 +216,7 @@ async function admit(
     document: runtime.document,
     payload: JSON.stringify({
       kind: "block_room.bootstrap_ack",
-      protocolVersion: 1,
+      protocolVersion: 2,
       challenge: "challenge-a",
       stateVector: Buffer.from(Y.encodeStateVector(runtime.document)).toString(
         "base64",
@@ -239,7 +239,7 @@ describe("resident Block room WebSocket protocol", () => {
     >;
     expect(bootstrap).toMatchObject({
       kind: "block_room.bootstrap",
-      protocolVersion: 1,
+      protocolVersion: 2,
       bootstrapChallenge: "challenge-a",
       documentName: DOCUMENT_NAME,
       documentType: "post",
@@ -293,6 +293,48 @@ describe("resident Block room WebSocket protocol", () => {
     }
   });
 
+  it("rejects a protocol v1 bootstrap ACK before admission and blocks sync writes", async () => {
+    const runtime = setup();
+    const admission = context();
+    runtime.connection.context = admission;
+    runtime.protocol.connected(
+      runtime.connection as never,
+      admission,
+      DOCUMENT_NAME,
+      runtime.document,
+    );
+
+    await expect(
+      runtime.protocol.handleStateless({
+        connection: runtime.connection,
+        documentName: DOCUMENT_NAME,
+        document: runtime.document,
+        payload: JSON.stringify({
+          kind: "block_room.bootstrap_ack",
+          protocolVersion: 1,
+          challenge: "challenge-a",
+          stateVector: Buffer.from(
+            Y.encodeStateVector(runtime.document),
+          ).toString("base64"),
+        }),
+      } as never),
+    ).resolves.toBe(false);
+    expect(admission.blockRoomAdmissionState).toBe("issued");
+
+    expect(() =>
+      runtime.protocol.beforeSync(
+        runtime.connection as never,
+        admission,
+        DOCUMENT_NAME,
+        runtime.document,
+        2,
+        Y.encodeStateAsUpdate(runtime.document),
+      ),
+    ).toThrow("reload_required");
+    expect(admission.blockRoomAdmissionState).not.toBe("accepted");
+    expect(runtime.close).toHaveBeenCalledOnce();
+  });
+
   it("accepts the matching bootstrap ACK and serializes metadata on the same room", async () => {
     const {
       protocol,
@@ -312,7 +354,7 @@ describe("resident Block room WebSocket protocol", () => {
       document,
       payload: JSON.stringify({
         kind: "block_room.bootstrap_ack",
-        protocolVersion: 1,
+        protocolVersion: 2,
         challenge: "challenge-a",
         stateVector: Buffer.from(Y.encodeStateVector(document)).toString(
           "base64",
@@ -323,7 +365,7 @@ describe("resident Block room WebSocket protocol", () => {
     expect(admission.blockRoomAdmissionState).toBe("accepted");
     expect(JSON.parse(sendStateless.mock.calls.at(-1)![0])).toEqual({
       kind: "block_room.ready",
-      protocolVersion: 1,
+      protocolVersion: 2,
       bootstrapChallenge: "challenge-a",
     });
 
@@ -333,7 +375,7 @@ describe("resident Block room WebSocket protocol", () => {
       document,
       payload: JSON.stringify({
         kind: "block_room.snapshot",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: "11111111-1111-4111-8111-111111111112",
       }),
     } as never);
@@ -354,7 +396,7 @@ describe("resident Block room WebSocket protocol", () => {
       document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: { title: "변경" },
@@ -397,7 +439,7 @@ describe("resident Block room WebSocket protocol", () => {
       document,
       payload: JSON.stringify({
         kind: "block_room.bootstrap_ack",
-        protocolVersion: 1,
+        protocolVersion: 2,
         challenge: "forged",
         stateVector: Buffer.from(Y.encodeStateVector(document)).toString(
           "base64",
@@ -424,7 +466,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: { title: "제목" },
@@ -516,7 +558,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "page_layout",
         payload: { documentLayout: {} },
@@ -753,7 +795,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: existing.document,
       payload: JSON.stringify({
         kind: "block_room.snapshot",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: "11111111-1111-4111-8111-111111111112",
       }),
     } as never);
@@ -796,18 +838,18 @@ describe("resident Block room WebSocket protocol", () => {
     "{}",
     JSON.stringify({
       kind: "block_room.snapshot",
-      protocolVersion: 1,
+      protocolVersion: 2,
       requestId: "bad",
     }),
     JSON.stringify({
       kind: "block_room.bootstrap_ack",
-      protocolVersion: 1,
+      protocolVersion: 2,
       challenge: "",
       stateVector: "",
     }),
     JSON.stringify({
       kind: "block_room.metadata",
-      protocolVersion: 1,
+      protocolVersion: 2,
       requestId: REQUEST_ID,
       operation: "bad",
       payload: {},
@@ -867,7 +909,7 @@ describe("resident Block room WebSocket protocol", () => {
         document: runtime.document,
         payload: JSON.stringify({
           kind: "block_room.bootstrap_ack",
-          protocolVersion: 1,
+          protocolVersion: 2,
           challenge: "challenge-a",
           stateVector,
         }),
@@ -891,7 +933,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: markFailure.document,
       payload: JSON.stringify({
         kind: "block_room.bootstrap_ack",
-        protocolVersion: 1,
+        protocolVersion: 2,
         challenge: "challenge-a",
         stateVector: Buffer.from(
           Y.encodeStateVector(markFailure.document),
@@ -909,12 +951,12 @@ describe("resident Block room WebSocket protocol", () => {
     for (const message of [
       {
         kind: "block_room.snapshot",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
       },
       {
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: {},
@@ -941,7 +983,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.snapshot",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
       }),
     } as never);
@@ -958,7 +1000,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: {},
@@ -982,7 +1024,7 @@ describe("resident Block room WebSocket protocol", () => {
         document: runtime.document,
         payload: JSON.stringify({
           kind: "block_room.metadata",
-          protocolVersion: 1,
+          protocolVersion: 2,
           requestId: REQUEST_ID,
           operation: "document",
           payload: body,
@@ -1006,7 +1048,7 @@ describe("resident Block room WebSocket protocol", () => {
         document: runtime.document,
         payload: JSON.stringify({
           kind: "block_room.metadata",
-          protocolVersion: 1,
+          protocolVersion: 2,
           requestId: REQUEST_ID,
           operation,
           payload: body,
@@ -1032,7 +1074,7 @@ describe("resident Block room WebSocket protocol", () => {
         document: runtime.document,
         payload: JSON.stringify({
           kind: "block_room.metadata",
-          protocolVersion: 1,
+          protocolVersion: 2,
           requestId: REQUEST_ID,
           operation: "page_layout",
           payload: body,
@@ -1056,7 +1098,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "document",
         payload: {},
@@ -1082,7 +1124,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: {},
@@ -1122,7 +1164,7 @@ describe("resident Block room WebSocket protocol", () => {
       document: runtime.document,
       payload: JSON.stringify({
         kind: "block_room.metadata",
-        protocolVersion: 1,
+        protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "locale",
         payload: {},
