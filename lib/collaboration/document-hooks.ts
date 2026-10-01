@@ -36,6 +36,7 @@ import type { BlockRoomProtocol } from "./block-room-protocol.ts";
 import type { CollabConnectionContext } from "./connection-context.ts";
 import type { RoomEpochRegistry } from "./room-epoch.ts";
 import type { RoomOwnership } from "./room-ownership.ts";
+import { isAttributedInboundMutation } from "./inbound-mutation.ts";
 import {
   residentBlockDocumentType,
   type ResidentBlockRuntime,
@@ -206,7 +207,10 @@ async function handleChange(
   { documentName, connection, context, transactionOrigin }: onChangePayload,
 ): Promise<void> {
   const collaborationContext = context as CollabConnectionContext | undefined;
-  if (collaborationContext?.canEdit === false) {
+  if (
+    collaborationContext?.canEdit === false ||
+    isAttributedInboundMutation(transactionOrigin)
+  ) {
     return;
   }
   dependencies.editSessions().recordAcceptedChange({

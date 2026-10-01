@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 export const COLLAB_RELOAD_REQUIRED_SIGNAL = "reload_required";
+const ROOM_EPOCH_TOKEN_TTL_MS = 24 * 60 * 60 * 1_000;
+const ROOM_EPOCH_MAX_TOKENS_PER_ROOM = 1_024;
 
 export class RoomEpochMismatchError extends Error {
   readonly reason = COLLAB_RELOAD_REQUIRED_SIGNAL;
@@ -23,12 +25,19 @@ export interface RoomEpochBinding {
 }
 
 interface IssuedRoomEpochToken extends RoomEpochBinding {
-  documentName: string;
   roomEpoch: string;
   synchronized: boolean;
+  lastUsedAt: number;
+  lastAccessOrder: number;
 }
 
 type CreateId = () => string;
+
+export interface RoomEpochRegistryOptions {
+  now?: () => number;
+  tokenTtlMs?: number;
+  maxTokensPerRoom?: number;
+}
 
 /**
  * Process-local admission fence for resident collaboration rooms. Epochs are
@@ -38,15 +47,41 @@ type CreateId = () => string;
 export class RoomEpochRegistry {
   readonly serverInstanceId: string;
   private readonly roomEpochs = new Map<string, string>();
-  private readonly tokens = new Map<string, IssuedRoomEpochToken>();
+  private readonly tokensByRoom = new Map<
+    string,
+    Map<string, IssuedRoomEpochToken>
+  >();
+  private readonly now: () => number;
+  private readonly tokenTtlMs: number;
+  private readonly maxTokensPerRoom: number;
+  private nextTokenAccessOrder = 0;
 
-  constructor(private readonly createId: CreateId = randomUUID) {
+  constructor(
+    private readonly createId: CreateId = randomUUID,
+    options: RoomEpochRegistryOptions = {},
+  ) {
+    this.now = options.now ?? Date.now;
+    this.tokenTtlMs = options.tokenTtlMs ?? ROOM_EPOCH_TOKEN_TTL_MS;
+    this.maxTokensPerRoom =
+      options.maxTokensPerRoom ?? ROOM_EPOCH_MAX_TOKENS_PER_ROOM;
+    if (!Number.isFinite(this.tokenTtlMs) || this.tokenTtlMs <= 0) {
+      throw new RangeError("Room epoch token TTL must be a positive number");
+    }
+    if (
+      !Number.isSafeInteger(this.maxTokensPerRoom) ||
+      this.maxTokensPerRoom <= 0
+    ) {
+      throw new RangeError(
+        "Room epoch token limit must be a positive safe integer",
+      );
+    }
     this.serverInstanceId = createId();
   }
 
   issue(
     documentName: string,
   ): Pick<RoomEpochAdmission, "serverInstanceId" | "roomEpoch"> {
+    this.pruneTokens(documentName, this.readNow());
     let roomEpoch = this.roomEpochs.get(documentName);
     if (!roomEpoch) {
       roomEpoch = this.createId();
@@ -57,14 +92,22 @@ export class RoomEpochRegistry {
 
   issueToken(documentName: string, binding: RoomEpochBinding): string {
     const { roomEpoch } = this.issue(documentName);
+    const now = this.readNow();
     const token = this.createId();
-    this.tokens.set(token, {
-      documentName,
+    let roomTokens = this.tokensByRoom.get(documentName);
+    if (!roomTokens) {
+      roomTokens = new Map();
+      this.tokensByRoom.set(documentName, roomTokens);
+    }
+    roomTokens.set(token, {
       roomEpoch,
       ...binding,
       yjsBootstrapStateVector: binding.yjsBootstrapStateVector.slice(),
       synchronized: false,
+      lastUsedAt: now,
+      lastAccessOrder: this.nextTokenAccessOrder++,
     });
+    this.pruneTokens(documentName, now);
     return token;
   }
 
@@ -72,14 +115,18 @@ export class RoomEpochRegistry {
     documentName: string,
     tokenValue: string,
   ): RoomEpochAdmission | undefined {
-    const token = this.tokens.get(tokenValue);
-    if (!token || token.documentName !== documentName) {
+    const now = this.readNow();
+    this.pruneTokens(documentName, now);
+    const token = this.tokensByRoom.get(documentName)?.get(tokenValue);
+    if (!token) {
       return undefined;
     }
     const activeEpoch = this.roomEpochs.get(documentName);
     if (!activeEpoch || token.roomEpoch !== activeEpoch) {
       return undefined;
     }
+    token.lastUsedAt = now;
+    token.lastAccessOrder = this.nextTokenAccessOrder++;
     return {
       serverInstanceId: this.serverInstanceId,
       roomEpoch: token.roomEpoch,
@@ -109,13 +156,11 @@ export class RoomEpochRegistry {
   }
 
   markSynchronized(documentName: string, tokenValue: string): boolean {
-    const token = this.tokens.get(tokenValue);
+    const now = this.readNow();
+    this.pruneTokens(documentName, now);
+    const token = this.tokensByRoom.get(documentName)?.get(tokenValue);
     const activeEpoch = this.roomEpochs.get(documentName);
-    if (
-      !token ||
-      token.documentName !== documentName ||
-      token.roomEpoch !== activeEpoch
-    ) {
+    if (!token || token.roomEpoch !== activeEpoch) {
       return false;
     }
     token.synchronized = true;
@@ -124,10 +169,42 @@ export class RoomEpochRegistry {
 
   retire(documentName: string): void {
     this.roomEpochs.delete(documentName);
-    for (const [tokenValue, token] of this.tokens) {
-      if (token.documentName === documentName) {
-        this.tokens.delete(tokenValue);
+    this.tokensByRoom.delete(documentName);
+  }
+
+  private readNow(): number {
+    const now = this.now();
+    if (!Number.isFinite(now)) {
+      throw new RangeError("Room epoch registry clock must return a number");
+    }
+    return now;
+  }
+
+  private pruneTokens(documentName: string, now: number): void {
+    const roomTokens = this.tokensByRoom.get(documentName);
+    if (!roomTokens) return;
+
+    for (const [tokenValue, token] of roomTokens) {
+      if (now - token.lastUsedAt >= this.tokenTtlMs) {
+        roomTokens.delete(tokenValue);
       }
+    }
+
+    while (roomTokens.size > this.maxTokensPerRoom) {
+      // The positive capacity and overflow condition guarantee a first token.
+      let oldestTokenValue = roomTokens.keys().next().value!;
+      let oldestAccessOrder = Number.POSITIVE_INFINITY;
+      for (const [tokenValue, token] of roomTokens) {
+        if (token.lastAccessOrder < oldestAccessOrder) {
+          oldestTokenValue = tokenValue;
+          oldestAccessOrder = token.lastAccessOrder;
+        }
+      }
+      roomTokens.delete(oldestTokenValue);
+    }
+
+    if (roomTokens.size === 0) {
+      this.tokensByRoom.delete(documentName);
     }
   }
 }

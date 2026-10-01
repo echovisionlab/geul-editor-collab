@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createConnectionHooks } from "./connection-hooks.ts";
+import * as Y from "yjs";
 
 function hooks(fenced = false) {
   const blockRooms = {
@@ -9,7 +10,11 @@ function hooks(fenced = false) {
   const editSessions = {
     connected: vi.fn(),
     disconnected: vi.fn(),
-    flushPendingMutationBefore: vi.fn(async () => undefined),
+    applyAcceptedMutation: vi.fn(
+      async (_document, _change, apply: () => boolean) => {
+        apply();
+      },
+    ),
   };
   const metadataAiGrace = { connected: vi.fn(), disconnected: vi.fn() };
   const settlePendingRoomInvalidation = vi.fn(async () => undefined);
@@ -34,7 +39,7 @@ describe("Block room connection hooks", () => {
   it("delegates sync admission to the room protocol", async () => {
     const { result, blockRooms } = hooks();
     const payload = new Uint8Array([1, 2, 3]);
-    const document = {};
+    const document = new Y.Doc();
     const connection = { document };
     const context = { blockRoomAdmissionState: "pending" };
 
@@ -59,7 +64,7 @@ describe("Block room connection hooks", () => {
 
   it("flushes a prior mutation actor before an admitted actor sync update", async () => {
     const { result, blockRooms, editSessions } = hooks();
-    const document = {};
+    const document = new Y.Doc();
     const connection = { document, readOnly: false };
     const context = {
       blockRoomAdmissionState: "accepted",
@@ -73,16 +78,16 @@ describe("Block room connection hooks", () => {
       documentName: "post:one",
       document,
       type: 2,
-      payload: new Uint8Array([1]),
+      payload: Y.encodeStateAsUpdate(new Y.Doc()),
     } as never);
 
-    expect(editSessions.flushPendingMutationBefore).toHaveBeenCalledWith(
-      "post:one",
+    expect(editSessions.applyAcceptedMutation).toHaveBeenCalledWith(
       document,
-      "member-2",
+      expect.objectContaining({ documentName: "post:one", context }),
+      expect.any(Function),
     );
     expect(
-      editSessions.flushPendingMutationBefore.mock.invocationCallOrder[0],
+      editSessions.applyAcceptedMutation.mock.invocationCallOrder[0],
     ).toBeLessThan(blockRooms.beforeSync.mock.invocationCallOrder[0]!);
   });
 
@@ -101,7 +106,7 @@ describe("Block room connection hooks", () => {
       type: 2,
       payload: new Uint8Array([1]),
     } as never);
-    expect(editSessions.flushPendingMutationBefore).not.toHaveBeenCalled();
+    expect(editSessions.applyAcceptedMutation).not.toHaveBeenCalled();
   });
 
   it("drops awareness before admission and accepts it after admission", async () => {

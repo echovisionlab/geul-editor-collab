@@ -28,6 +28,46 @@ type PersistDocument<TDocument> = (
 export class EditSessionContributorTracker<
   TDocument extends EditSessionDocumentLike,
 > extends EditSessionLifecycle<TDocument> {
+  private readonly inboundMutations = new WeakMap<TDocument, Promise<void>>();
+
+  /** A single lane covers the previous actor's durable save, validation, apply and attribution. */
+  applyAcceptedMutation(
+    document: TDocument,
+    change: AcceptedDocumentChange,
+    apply: () => boolean,
+  ): Promise<void> {
+    const previous = this.inboundMutations.get(document) ?? Promise.resolve();
+    const operation = previous.then(async () => {
+      const memberId = this.acceptedContributor(change);
+      if (!memberId) {
+        throw new Error("collaboration_mutation_actor_required");
+      }
+      await this.flushPendingMutationBefore(
+        change.documentName,
+        document,
+        memberId,
+      );
+      if (this.isDeletedEntity(change.documentName)) {
+        throw new EditSessionEntityDeletedError(change.documentName);
+      }
+      if (apply()) {
+        this.recordContributor(change.documentName, memberId);
+      }
+    });
+    // A rejected frame must not poison this resident document's later frames.
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.inboundMutations.set(document, settled);
+    void settled.then(() => {
+      if (this.inboundMutations.get(document) === settled) {
+        this.inboundMutations.delete(document);
+      }
+    });
+    return operation;
+  }
+
   documentsForEntity(
     entityDocumentName: string,
   ): Array<{ documentName: string; document: TDocument }> {
