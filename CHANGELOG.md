@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.3.1](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.0...v0.3.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **collab:** preserve connections on peer awareness timeout ([#21](https://github.com/echovisionlab/geul-editor-collab/issues/21)) ([fd92bf9](https://github.com/echovisionlab/geul-editor-collab/commit/fd92bf9dc063a5c90ff46986c6ea73b7739d9707))
+
 ## [0.3.0](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.4...v0.3.0) (2026-10-01)
 
 
