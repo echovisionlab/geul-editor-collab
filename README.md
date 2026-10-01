@@ -65,7 +65,18 @@ checks the owning API before each inbound frame, and never persists the session
 identifier to awareness, Yjs, or collaboration logs. `VIEW` connections receive
 canonical sync and presence without mutation or persistence.
 
+Resume tokens are process-local. A token expires 24 hours after issue or its
+last successful validation, and each room retains at most 1,024 tokens, evicting
+the least recently used token when the limit is reached. Resuming with an
+expired or evicted token returns `reload_required`; the client recovers by
+bootstrapping a fresh canonical document and obtaining a new token. Expiry and
+eviction affect reconnects only: an already authenticated connection continues
+to be admitted by its server and room epoch for the lifetime of that room.
+
 ## Validation
+
+Inbound frame validation, apply and contributor attribution share the
+[resident document actor lane](docs/inbound-mutation-ownership.md).
 
 ```bash
 pnpm format:check

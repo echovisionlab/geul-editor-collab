@@ -11,7 +11,8 @@ import type { ShutdownConnectionDrain } from "./shutdown-connection-drain.ts";
 import { shutdownSocketAdmissionScopeFromContext } from "./shutdown-connection-drain.ts";
 import { shutdownAdmissionFromContext } from "./connection-context.ts";
 import { COLLAB_RELOAD_REQUIRED_SIGNAL } from "./room-epoch.ts";
-import { authenticatedMemberId } from "./edit-session-contributor-types.ts";
+import type { AcceptedDocumentChange } from "./edit-session-contributor-types.ts";
+import { applyInboundMutation } from "./inbound-mutation.ts";
 
 type ConnectedPayload = Parameters<
   NonNullable<ServerConfiguration["connected"]>
@@ -52,10 +53,10 @@ export interface ConnectionHookDependencies {
   editSessions(): {
     connected(documentName: string, memberId: string | undefined): void;
     disconnected(documentName: string): void;
-    flushPendingMutationBefore(
-      documentName: string,
+    applyAcceptedMutation(
       document: Connection["document"],
-      authenticatedMemberId: string | undefined,
+      change: AcceptedDocumentChange,
+      apply: () => boolean,
     ): Promise<void>;
   };
   blockRooms: BlockRoomConnectionProtocol;
@@ -184,13 +185,32 @@ function createBeforeSyncHandler(dependencies: ConnectionHookDependencies) {
       collabContext.canEdit !== false &&
       connection.readOnly !== true
     ) {
-      await dependencies
-        .editSessions()
-        .flushPendingMutationBefore(
+      await dependencies.editSessions().applyAcceptedMutation(
+        document,
+        {
           documentName,
-          document,
-          authenticatedMemberId(collabContext),
-        );
+          connection,
+          context: collabContext,
+          transactionOrigin: { source: "connection" },
+        },
+        () => {
+          // Admission and locale ownership are checked against the latest room
+          // after any earlier actor's persistence has finished.
+          dependencies.blockRooms.beforeSync(
+            connection,
+            collabContext,
+            documentName,
+            document,
+            type,
+            payload,
+          );
+          if (collabContext.canEdit === false || connection.readOnly) {
+            throw new Error("permission_denied");
+          }
+          return applyInboundMutation(document, connection, payload);
+        },
+      );
+      return;
     }
     dependencies.blockRooms.beforeSync(
       connection,
