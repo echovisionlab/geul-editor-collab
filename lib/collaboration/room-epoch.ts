@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 export const COLLAB_RELOAD_REQUIRED_SIGNAL = "reload_required";
-export const ROOM_EPOCH_TOKEN_TTL_MS = 24 * 60 * 60 * 1_000;
-export const ROOM_EPOCH_MAX_TOKENS_PER_ROOM = 1_024;
+const ROOM_EPOCH_TOKEN_TTL_MS = 24 * 60 * 60 * 1_000;
+const ROOM_EPOCH_MAX_TOKENS_PER_ROOM = 1_024;
 
 export class RoomEpochMismatchError extends Error {
   readonly reason = COLLAB_RELOAD_REQUIRED_SIGNAL;
@@ -191,7 +191,8 @@ export class RoomEpochRegistry {
     }
 
     while (roomTokens.size > this.maxTokensPerRoom) {
-      let oldestTokenValue: string | undefined;
+      // The positive capacity and overflow condition guarantee a first token.
+      let oldestTokenValue = roomTokens.keys().next().value!;
       let oldestAccessOrder = Number.POSITIVE_INFINITY;
       for (const [tokenValue, token] of roomTokens) {
         if (token.lastAccessOrder < oldestAccessOrder) {
@@ -199,7 +200,6 @@ export class RoomEpochRegistry {
           oldestAccessOrder = token.lastAccessOrder;
         }
       }
-      if (oldestTokenValue === undefined) break;
       roomTokens.delete(oldestTokenValue);
     }
 

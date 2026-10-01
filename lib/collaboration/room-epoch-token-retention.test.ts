@@ -7,6 +7,63 @@ function ids(...values: string[]): () => string {
 }
 
 describe("RoomEpochRegistry token retention", () => {
+  it("rejects invalid retention configuration and clock values", () => {
+    expect(
+      () =>
+        new RoomEpochRegistry(ids("server-a"), {
+          tokenTtlMs: 0,
+        }),
+    ).toThrow("Room epoch token TTL must be a positive number");
+    expect(
+      () =>
+        new RoomEpochRegistry(ids("server-a"), {
+          maxTokensPerRoom: 0,
+        }),
+    ).toThrow("Room epoch token limit must be a positive safe integer");
+
+    const invalidClock = new RoomEpochRegistry(ids("server-a"), {
+      now: () => Number.NaN,
+    });
+    expect(() => invalidClock.issue("post:post-1")).toThrow(
+      "Room epoch registry clock must return a number",
+    );
+  });
+
+  it("rejects admissions from another server, epoch, or retired room", () => {
+    const registry = new RoomEpochRegistry(ids("server-a", "epoch-a"));
+    const admission = {
+      serverInstanceId: "server-a",
+      roomEpoch: "epoch-a",
+      yjsBootstrapStateVector: Uint8Array.of(0),
+      requiresCanonicalSyncFence: false,
+    };
+
+    expect(
+      registry.validateAdmission("post:post-1", admission),
+    ).toBeUndefined();
+    registry.issue("post:post-1");
+    expect(
+      registry.validateAdmission("post:post-1", {
+        ...admission,
+        serverInstanceId: "server-b",
+      }),
+    ).toBeUndefined();
+    expect(
+      registry.validateAdmission("post:post-1", {
+        ...admission,
+        roomEpoch: "epoch-b",
+      }),
+    ).toBeUndefined();
+    expect(registry.validateAdmission("post:post-1", admission)).toEqual(
+      admission,
+    );
+
+    registry.retire("post:post-1");
+    expect(
+      registry.validateAdmission("post:post-1", admission),
+    ).toBeUndefined();
+  });
+
   it("expires after 24 hours without a successful resume and refreshes on resume", () => {
     let now = 1_000;
     const registry = new RoomEpochRegistry(
