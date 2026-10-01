@@ -13,13 +13,14 @@ import {
   savePostSeriesDocument,
 } from "../lib/api/post-series.ts";
 import { handlerDocumentIdentity } from "../lib/collaboration/handler-document-identity.ts";
+import {
+  projectDocumentRoomSnapshot,
+  type DocumentRoomSnapshot,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { requireSaveContributorMemberIds } from "../lib/collaboration/mutation-contributors.ts";
 import { TransientDocumentStateMap } from "../lib/transient-document-state.ts";
 
-interface PostSeriesRevisionTuple {
-  documentRevision: string;
-  targetRevision?: string;
-}
+type PostSeriesRevisionTuple = DocumentRoomSnapshot;
 
 const sourceLocaleByDocument = new TransientDocumentStateMap<string>();
 const revisionByDocument =
@@ -45,9 +46,10 @@ export const postSeriesHandler: DocumentHandler = {
     const revision = requireRevisionTuple(
       response.locale,
       response.sourceLocale,
+      response.localeExists,
       response.documentRevision,
       response.targetRevision,
-      response.localeExists,
+      identity.stateKey,
     );
     const document = hydratePostSeriesCanonicalRoom({
       sourceLocale: response.sourceLocale,
@@ -60,6 +62,7 @@ export const postSeriesHandler: DocumentHandler = {
     sourceLocaleByDocument.set(identity.stateKey, response.sourceLocale);
     revisionByDocument.set(identity.stateKey, revision);
     lastSnapshotByDocument.set(identity.stateKey, snapshot);
+    projectDocumentRoomSnapshot(document, revision);
     return Buffer.from(Y.encodeStateAsUpdate(document));
   },
 
@@ -92,26 +95,27 @@ export const postSeriesHandler: DocumentHandler = {
     if (response.locale !== identity.locale || !response.documentRevision) {
       throw new Error("Invalid Post Series collaboration save response");
     }
-    revisionByDocument.set(
+    const nextRevision = requireRevisionTuple(
+      response.locale,
+      sourceLocale,
+      true,
+      response.documentRevision,
+      response.targetRevision,
       identity.stateKey,
-      requireRevisionTuple(
-        response.locale,
-        sourceLocale,
-        response.documentRevision,
-        response.targetRevision,
-        true,
-      ),
     );
+    revisionByDocument.set(identity.stateKey, nextRevision);
     lastSnapshotByDocument.set(identity.stateKey, snapshot);
+    projectDocumentRoomSnapshot(rawDocument as Y.Doc, nextRevision);
   },
 };
 
 function requireRevisionTuple(
   locale: string,
   sourceLocale: string,
+  localeExists: boolean,
   documentRevision: string,
   targetRevision: string | undefined,
-  localeExists: boolean,
+  documentName: string,
 ): PostSeriesRevisionTuple {
   if (!documentRevision) {
     throw new Error("Post Series document revision is missing");
@@ -123,7 +127,11 @@ function requireRevisionTuple(
     throw new Error("Post Series target revision is missing");
   }
   return {
+    documentName,
     documentRevision,
+    sourceLocale,
+    locale,
+    localeExists,
     ...(targetRevision === undefined ? {} : { targetRevision }),
   };
 }

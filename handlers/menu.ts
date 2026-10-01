@@ -10,13 +10,14 @@ import {
 import * as Y from "yjs";
 import { loadMenuDocument, saveMenuDocument } from "../lib/api/menu.ts";
 import { handlerDocumentIdentity } from "../lib/collaboration/handler-document-identity.ts";
+import {
+  projectDocumentRoomSnapshot,
+  type DocumentRoomSnapshot,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { requireSaveContributorMemberIds } from "../lib/collaboration/mutation-contributors.ts";
 import { TransientDocumentStateMap } from "../lib/transient-document-state.ts";
 
-interface MenuRevisionTuple {
-  documentRevision: string;
-  targetRevision?: string;
-}
+type MenuRevisionTuple = DocumentRoomSnapshot;
 
 const sourceLocaleByDocument = new TransientDocumentStateMap<string>();
 const revisionByDocument = new TransientDocumentStateMap<MenuRevisionTuple>();
@@ -41,9 +42,10 @@ export const menuHandler: DocumentHandler = {
     const revision = requireRevisionTuple(
       response.locale,
       response.sourceLocale,
+      response.localeExists,
       response.documentRevision,
       response.targetRevision,
-      response.localeExists,
+      identity.stateKey,
     );
     const document = hydrateMenuCanonicalRoom({
       sourceLocale: response.sourceLocale,
@@ -60,6 +62,7 @@ export const menuHandler: DocumentHandler = {
       identity.stateKey,
       extractMenuCanonicalSnapshot(document),
     );
+    projectDocumentRoomSnapshot(document, revision);
     return Buffer.from(Y.encodeStateAsUpdate(document));
   },
 
@@ -92,26 +95,27 @@ export const menuHandler: DocumentHandler = {
     if (response.locale !== identity.locale || !response.documentRevision) {
       throw new Error("Invalid Menu collaboration save response");
     }
-    revisionByDocument.set(
+    const nextRevision = requireRevisionTuple(
+      response.locale,
+      sourceLocale,
+      true,
+      response.documentRevision,
+      response.targetRevision,
       identity.stateKey,
-      requireRevisionTuple(
-        response.locale,
-        sourceLocale,
-        response.documentRevision,
-        response.targetRevision,
-        true,
-      ),
     );
+    revisionByDocument.set(identity.stateKey, nextRevision);
     lastSnapshotByDocument.set(identity.stateKey, snapshot);
+    projectDocumentRoomSnapshot(rawDocument as Y.Doc, nextRevision);
   },
 };
 
 function requireRevisionTuple(
   locale: string,
   sourceLocale: string,
+  localeExists: boolean,
   documentRevision: string,
   targetRevision: string | undefined,
-  localeExists: boolean,
+  documentName: string,
 ): MenuRevisionTuple {
   if (!documentRevision) throw new Error("Menu document revision is missing");
   if (locale === sourceLocale && targetRevision !== undefined) {
@@ -121,7 +125,11 @@ function requireRevisionTuple(
     throw new Error("Menu target revision is missing");
   }
   return {
+    documentName,
     documentRevision,
+    sourceLocale,
+    locale,
+    localeExists,
     ...(targetRevision === undefined ? {} : { targetRevision }),
   };
 }

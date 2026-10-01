@@ -8,6 +8,10 @@ import {
   materializeMenuCanonicalItems,
   setMenuLocaleLabel,
 } from "@echovisionlab/geul-common/collaboration/menu";
+import {
+  DOCUMENT_ROOM_SNAPSHOT_KEYS,
+  DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { menuHandler } from "./menu.ts";
 
 vi.mock("../lib/api/menu.ts", () => ({
@@ -57,6 +61,21 @@ describe("menuHandler", () => {
     const update = await menuHandler.load(room("ko"));
     const document = new Y.Doc();
     Y.applyUpdate(document, new Uint8Array(update ?? new Uint8Array()));
+    const observed = document.getMap<string | boolean>(
+      DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentName)).toBe(
+      room("ko"),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentRevision)).toBe(
+      revision(1),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.sourceLocale)).toBe("en");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.locale)).toBe("ko");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.localeExists)).toBe(true);
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.targetRevision)).toBe(
+      revision(2),
+    );
     expect(
       materializeMenuCanonicalItems(document).map((item) => item.label),
     ).toEqual(["Posts", "한국어"]);
@@ -76,6 +95,9 @@ describe("menuHandler", () => {
       expectedDocumentRevision: revision(1),
       expectedTargetRevision: revision(2),
     });
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.targetRevision)).toBe(
+      revision(3),
+    );
   });
 
   it("does not persist an unchanged source room", async () => {

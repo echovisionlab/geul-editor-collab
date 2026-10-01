@@ -8,6 +8,10 @@ import {
   materializeEmailLayoutUnits,
   setEmailLayoutLocaleValue,
 } from "@echovisionlab/geul-common/collaboration/email-layout";
+import {
+  DOCUMENT_ROOM_SNAPSHOT_KEYS,
+  DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { emailLayoutHandler } from "./email-layout.ts";
 
 vi.mock("../lib/api/email-layout.ts", () => ({
@@ -124,6 +128,21 @@ describe("emailLayoutHandler", () => {
       });
     const document = new Y.Doc();
     Y.applyUpdate(document, new Uint8Array(state ?? new Uint8Array()));
+    const observed = document.getMap<string | boolean>(
+      DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentName)).toBe(
+      room("target", "ko"),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentRevision)).toBe(
+      revision(1),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.sourceLocale)).toBe("en");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.locale)).toBe("ko");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.localeExists)).toBe(true);
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.targetRevision)).toBe(
+      revision(10),
+    );
     setEmailLayoutLocaleValue(document, "title-unit", "번역 제목");
 
     await emailLayoutHandler.store(room("target", "ko"), document, {
@@ -140,6 +159,9 @@ describe("emailLayoutHandler", () => {
         expectedTargetRevision: revision(10),
         localeValues: [{ handle: "title-unit", value: "번역 제목" }],
       }),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.targetRevision)).toBe(
+      revision(12),
     );
     expect(saveEmailLayoutDocument).toHaveBeenNthCalledWith(
       2,
@@ -330,7 +352,7 @@ describe("emailLayoutHandler", () => {
     ) {
       if (key !== documentName) return originalGet.call(this, key);
       reads += 1;
-      return reads === 2 ? undefined : originalGet.call(this, key);
+      return reads === 1 ? undefined : originalGet.call(this, key);
     });
 
     try {

@@ -2,7 +2,11 @@ import type {
   BlockRoomDocumentType,
   BlockRoomTypedDocument,
 } from "@echovisionlab/geul-common/collaboration/block-room-codec";
-import type { DocumentLayout } from "@echovisionlab/geul-proto/common/common_pb.ts";
+import { create, toJson } from "@bufbuild/protobuf";
+import {
+  DocumentLayoutSchema,
+  type DocumentLayout,
+} from "@echovisionlab/geul-proto/common/common_pb.ts";
 import type { CollaborationPrincipal } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
 import {
   applyPageBlockBatch,
@@ -45,8 +49,6 @@ import {
 } from "./resident-block-metadata.ts";
 import type { ResidentBlockCheckpointRequest } from "./resident-block-persistence.ts";
 import { projectSourceMetadata } from "../api/resident-block-load.ts";
-
-export type { ResidentBlockDomainLoad } from "./resident-block-load.ts";
 
 type RoomBatch = BlockMutationBatch<unknown, BlockRoomLocaleData>;
 
@@ -135,16 +137,19 @@ function residentRichTextGateway(
         locale,
         principal,
       );
-      return normalizeResidentBlockLoad({
-        document: response.document,
-        response,
-        requestedLocale: locale,
-        sourceMetadata: response.sourceMetadata,
-        ...(response.localeMetadata === undefined
-          ? {}
-          : { localeMetadata: response.localeMetadata }),
-        sourceMetadataMissingReason: `block_source_metadata_missing:${documentType}`,
-      });
+      return {
+        ...normalizeResidentBlockLoad({
+          document: response.document,
+          response,
+          requestedLocale: locale,
+          sourceMetadata: response.sourceMetadata,
+          ...(response.localeMetadata === undefined
+            ? {}
+            : { localeMetadata: response.localeMetadata }),
+          sourceMetadataMissingReason: `block_source_metadata_missing:${documentType}`,
+        }),
+        documentMetadata: response.documentMetadata,
+      };
     },
     async save(entityId, locale, batch) {
       const response = await applyResidentRichTextBlockBatch(
@@ -167,16 +172,24 @@ function postGateway(): ResidentBlockDomainGateway {
     async load(entityId, locale, principal) {
       const response = await loadPostBlockDocument(entityId, locale, principal);
       const document = requireDocument(response.document, "post");
-      return normalizeResidentBlockLoad({
-        document,
-        response,
-        requestedLocale: locale,
-        sourceMetadata: projectSourceMetadata(response.sourceMetadata),
-        ...(response.localeMetadata === undefined
-          ? {}
-          : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),
-        sourceMetadataMissingReason: "block_source_metadata_missing:post",
-      });
+      return {
+        ...normalizeResidentBlockLoad({
+          document,
+          response,
+          requestedLocale: locale,
+          sourceMetadata: projectSourceMetadata(response.sourceMetadata),
+          ...(response.localeMetadata === undefined
+            ? {}
+            : {
+                localeMetadata: projectSourceMetadata(response.localeMetadata),
+              }),
+          sourceMetadataMissingReason: "block_source_metadata_missing:post",
+        }),
+        documentMetadata: {
+          categoryIds: response.categoryIds,
+          tagIds: response.tagIds,
+        },
+      };
     },
     async save(entityId, locale, batch) {
       const response = await applyPostBlockBatch(
@@ -208,16 +221,27 @@ function pageGateway(): ResidentBlockDomainGateway {
     async load(entityId, locale, principal) {
       const response = await loadPageBlockDocument(entityId, locale, principal);
       const document = requireDocument(response.document, "page");
-      return normalizeResidentBlockLoad({
-        document,
-        response,
-        requestedLocale: locale,
-        sourceMetadata: projectSourceMetadata(response.sourceMetadata),
-        ...(response.localeMetadata === undefined
-          ? {}
-          : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),
-        sourceMetadataMissingReason: "block_source_metadata_missing:page",
-      });
+      return {
+        ...normalizeResidentBlockLoad({
+          document,
+          response,
+          requestedLocale: locale,
+          sourceMetadata: projectSourceMetadata(response.sourceMetadata),
+          ...(response.localeMetadata === undefined
+            ? {}
+            : {
+                localeMetadata: projectSourceMetadata(response.localeMetadata),
+              }),
+          sourceMetadataMissingReason: "block_source_metadata_missing:page",
+        }),
+        documentMetadata: {
+          documentLayout: toJson(
+            DocumentLayoutSchema,
+            response.documentLayout ?? create(DocumentLayoutSchema),
+            { alwaysEmitImplicit: true },
+          ),
+        },
+      };
     },
     async save(entityId, locale, batch) {
       const response = await applyPageBlockBatch(

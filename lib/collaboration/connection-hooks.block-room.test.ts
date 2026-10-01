@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  CollaborativeDocumentType,
+  createDocumentName,
+} from "@echovisionlab/geul-common/collaboration/document";
+import { FORM_FIELDS_MAP_NAME } from "@echovisionlab/geul-common/collaboration/form";
 import { createConnectionHooks } from "./connection-hooks.ts";
 import * as Y from "yjs";
 
@@ -89,6 +94,55 @@ describe("Block room connection hooks", () => {
     expect(
       editSessions.applyAcceptedMutation.mock.invocationCallOrder[0],
     ).toBeLessThan(blockRooms.beforeSync.mock.invocationCallOrder[0]!);
+  });
+
+  it("rejects legacy Form schema replacements after room validation and before applying the update", async () => {
+    const { result, blockRooms, editSessions } = hooks();
+    const document = new Y.Doc();
+    const schema = { id: "schema-1", steps: [] };
+    document
+      .getMap<unknown>(FORM_FIELDS_MAP_NAME)
+      .set("schema", JSON.stringify(schema));
+    const formDocumentName = createDocumentName(
+      CollaborativeDocumentType.FORM,
+      "11111111-1111-4111-8111-111111111111",
+      "en",
+    );
+    const client = new Y.Doc();
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(document));
+    const stateVector = Y.encodeStateVector(client);
+    client
+      .getMap<unknown>(FORM_FIELDS_MAP_NAME)
+      .set(
+        "schema",
+        JSON.stringify({ id: "schema-1", steps: [{ id: "legacy" }] }),
+      );
+    const update = Y.encodeStateAsUpdate(client, stateVector);
+    const connection = { document, readOnly: false };
+    const context = {
+      blockRoomAdmissionState: "accepted",
+      canEdit: true,
+      member: { id: "member-1" },
+    };
+
+    await expect(
+      result.beforeSync?.({
+        connection,
+        context,
+        documentName: formDocumentName,
+        document,
+        type: 2,
+        payload: update,
+      } as never),
+    ).rejects.toThrow("form_schema_patch_required");
+
+    expect(blockRooms.beforeSync).toHaveBeenCalledOnce();
+    expect(editSessions.applyAcceptedMutation).toHaveBeenCalledOnce();
+    expect(document.getMap<unknown>(FORM_FIELDS_MAP_NAME).get("schema")).toBe(
+      JSON.stringify(schema),
+    );
+    client.destroy();
+    document.destroy();
   });
 
   it("never opens a mutation actor lane for read-only presence sync", async () => {

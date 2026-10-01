@@ -39,6 +39,7 @@ import {
   ResidentBlockRuntime,
 } from "./resident-block-runtime.ts";
 import { BlockRoomProtocol } from "./block-room-protocol.ts";
+import { FormSchemaProtocol } from "./form-schema-protocol.ts";
 import { PostgresRoomOwnership, type RoomOwnership } from "./room-ownership.ts";
 import {
   createRoomInvalidation,
@@ -203,6 +204,36 @@ function createBlockRoomProtocol(
   });
 }
 
+function createFormSchemaProtocol(
+  roomOwnership: RoomOwnership,
+  revisionConflicts: RevisionConflictGuard,
+  getEditSessions: () => EditSessionContributorTracker<TrackedCollabDocument>,
+): FormSchemaProtocol {
+  return new FormSchemaProtocol({
+    isDocumentFenced: (documentName) =>
+      revisionConflicts.fencedDocumentNames.has(documentName),
+    isDocumentStale: (document) => revisionConflicts.isStale(document),
+    ownsDocument: (documentName) => roomOwnership.isOwned(documentName),
+    persist: async (documentName, document, authenticatedMemberId) => {
+      await persistCollaborativeDocument(documentName, document, {
+        contributorMemberIds: [authenticatedMemberId],
+      });
+    },
+    recordAcceptedChange: (documentName, authenticatedMemberId) => {
+      getEditSessions().recordAcceptedStatelessChange(
+        documentName,
+        authenticatedMemberId,
+      );
+    },
+    handleRevisionConflict: (error, documentName, document) =>
+      revisionConflicts.handle(
+        error,
+        documentName,
+        document as TrackedCollabDocument,
+      ),
+  });
+}
+
 function createEditSessionTracker(
   server: Server,
   residentBlocks: ResidentBlockRuntime,
@@ -292,6 +323,24 @@ export function createCollabServer(options: CollabServerOptions = {}): Server {
     revisionConflicts,
     getEditSessions,
   );
+  const formSchemaProtocol = createFormSchemaProtocol(
+    roomOwnership,
+    revisionConflicts,
+    getEditSessions,
+  );
+  const documentHooks = createDocumentHooks({
+    editSessions: getEditSessions,
+    metadataAiGrace,
+    revisionConflicts,
+    shutdownConnections: shutdownConnections,
+    roomEpochs,
+    residentBlocks,
+    blockRooms,
+    roomOwnership,
+    ownedDocuments,
+    clearPendingRoomInvalidation: (documentName) =>
+      roomInvalidation.current!.clearPending(documentName),
+  });
   const server = new Server({
     port: env.PORT,
     name: "geul-collab",
@@ -317,19 +366,11 @@ export function createCollabServer(options: CollabServerOptions = {}): Server {
           document as TrackedCollabDocument,
         ),
     }),
-    ...createDocumentHooks({
-      editSessions: getEditSessions,
-      metadataAiGrace,
-      revisionConflicts,
-      shutdownConnections,
-      roomEpochs,
-      residentBlocks,
-      blockRooms,
-      roomOwnership,
-      ownedDocuments,
-      clearPendingRoomInvalidation: (documentName) =>
-        roomInvalidation.current!.clearPending(documentName),
-    }),
+    ...documentHooks,
+    onStateless: async (payload) => {
+      if (await formSchemaProtocol.handleStateless(payload)) return;
+      await documentHooks.onStateless?.(payload);
+    },
   });
   serverRef.current = server;
   editSessions = createEditSessionTracker(

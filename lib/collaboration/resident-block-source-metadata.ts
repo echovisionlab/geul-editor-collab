@@ -19,8 +19,17 @@ export function applyResidentSourceMetadataUpdate(
 }
 
 function titleUpdate(update: ResidentBlockMetadataUpdate) {
-  if (!("title" in update) || update.title === undefined) return {};
-  return { title: update.title ?? undefined };
+  if ("sourceTitle" in update) {
+    return update.sourceTitle === undefined
+      ? {}
+      : { title: update.sourceTitle };
+  }
+  if ("title" in update) {
+    return update.title === undefined
+      ? {}
+      : { title: update.title ?? undefined };
+  }
+  return {};
 }
 
 function summaryUpdate(update: ResidentBlockMetadataUpdate) {

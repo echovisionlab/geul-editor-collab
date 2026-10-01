@@ -35,6 +35,55 @@ describe("applyResidentSourceMetadataUpdate", () => {
     ).toEqual({ locale: "en", title: "Old", summary: "Old summary" });
   });
 
+  it("projects source-title aliases while keeping omitted and undefined fields", () => {
+    const current = {
+      locale: "en",
+      title: "Old title",
+      summary: "Old summary",
+      subject: "Old subject",
+      creditNotes: [{ creditId: "credit-1", note: "Old note" }],
+    };
+
+    expect(
+      applyResidentSourceMetadataUpdate(current, {
+        type: "work",
+        sourceTitle: undefined,
+        summary: undefined,
+      }),
+    ).toEqual(current);
+    expect(
+      applyResidentSourceMetadataUpdate(current, {
+        type: "work",
+        sourceTitle: "New work title",
+        summary: null,
+      }),
+    ).toEqual({
+      ...current,
+      title: "New work title",
+      summary: undefined,
+    });
+    expect(
+      applyResidentSourceMetadataUpdate(current, {
+        type: "post",
+        scope: "locale",
+        title: undefined,
+        summary: undefined,
+      }),
+    ).toEqual(current);
+    expect(
+      applyResidentSourceMetadataUpdate(current, {
+        type: "campaign",
+        subject: undefined,
+      }),
+    ).toEqual(current);
+    expect(
+      applyResidentSourceMetadataUpdate(current, {
+        type: "release",
+        creditNotes: undefined,
+      }),
+    ).toEqual(current);
+  });
+
   it("projects campaign subjects and release credit notes", () => {
     expect(
       applyResidentSourceMetadataUpdate(

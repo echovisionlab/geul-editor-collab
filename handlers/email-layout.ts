@@ -13,6 +13,10 @@ import {
 } from "../lib/api/email-layout.ts";
 import { TransientDocumentStateMap } from "../lib/transient-document-state.ts";
 import { handlerDocumentIdentity } from "../lib/collaboration/handler-document-identity.ts";
+import {
+  projectDocumentRoomSnapshot,
+  type DocumentRoomSnapshot,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { requireSaveContributorMemberIds } from "../lib/collaboration/mutation-contributors.ts";
 
 export const emailLayoutHandler: DocumentHandler = {
@@ -25,8 +29,8 @@ export const emailLayoutHandler: DocumentHandler = {
     );
     const doc = document as Y.Doc;
     const contributorMemberIds = requireSaveContributorMemberIds(options);
-    const sourceLocale = requireEmailLayoutSourceLocale(identity.stateKey);
     const expectedRevision = requireEmailLayoutRevision(identity.stateKey);
+    const sourceLocale = expectedRevision.sourceLocale;
 
     const response = await saveEmailLayoutDocument({
       emailLayoutId: identity.entityId,
@@ -45,30 +49,16 @@ export const emailLayoutHandler: DocumentHandler = {
     if (response.locale !== identity.locale) {
       throw new Error("Email Layout collaboration response locale mismatch");
     }
-    if (!response.documentRevision) {
-      throw new Error(
-        "Email Layout collaboration response document revision missing",
-      );
-    }
-    if (
-      identity.locale === sourceLocale &&
-      response.targetRevision !== undefined
-    ) {
-      throw new Error(
-        "Email Layout source collaboration returned target revision",
-      );
-    }
-    if (identity.locale !== sourceLocale && !response.targetRevision) {
-      throw new Error(
-        "Email Layout target collaboration response target revision missing",
-      );
-    }
-    lastLoadedEmailLayoutRevision.set(identity.stateKey, {
-      documentRevision: response.documentRevision,
-      ...(response.targetRevision === undefined
-        ? {}
-        : { targetRevision: response.targetRevision }),
-    });
+    const revision = requireEmailLayoutRevisionTuple(
+      identity.stateKey,
+      sourceLocale,
+      identity.locale,
+      true,
+      response.documentRevision,
+      response.targetRevision,
+    );
+    lastLoadedEmailLayoutRevision.set(identity.stateKey, revision);
+    projectDocumentRoomSnapshot(doc, revision);
   },
 
   async load(id) {
@@ -88,21 +78,23 @@ export const emailLayoutHandler: DocumentHandler = {
     if (response.locale !== identity.locale) {
       throw new Error("Email Layout collaboration response locale mismatch");
     }
-    lastLoadedEmailLayoutSourceLocale.set(
-      identity.stateKey,
-      response.sourceLocale,
-    );
     if (!response.documentRevision) {
       throw new Error(
         "Email Layout collaboration document revision is missing",
       );
     }
-    lastLoadedEmailLayoutRevision.set(identity.stateKey, {
-      documentRevision: response.documentRevision,
-      ...(response.targetRevision === undefined
-        ? {}
-        : { targetRevision: response.targetRevision }),
-    });
+    const localeExists =
+      response.locale === response.sourceLocale ||
+      response.targetRevision !== undefined;
+    const revision = requireEmailLayoutRevisionTuple(
+      identity.stateKey,
+      response.sourceLocale,
+      response.locale,
+      localeExists,
+      response.documentRevision,
+      response.targetRevision,
+    );
+    lastLoadedEmailLayoutRevision.set(identity.stateKey, revision);
 
     const document = hydrateEmailLayoutCanonicalRoom({
       sourceLocale: response.sourceLocale,
@@ -116,29 +108,15 @@ export const emailLayoutHandler: DocumentHandler = {
         response.localeValues.map(({ handle, value }) => [handle, value]),
       ),
     });
+    projectDocumentRoomSnapshot(document, revision);
     return Buffer.from(Y.encodeStateAsUpdate(document));
   },
 };
 
-type EmailLayoutRevisionTuple = {
-  documentRevision: string;
-  targetRevision?: string;
-};
+type EmailLayoutRevisionTuple = DocumentRoomSnapshot;
 
 const lastLoadedEmailLayoutRevision =
   new TransientDocumentStateMap<EmailLayoutRevisionTuple>();
-const lastLoadedEmailLayoutSourceLocale =
-  new TransientDocumentStateMap<string>();
-
-function requireEmailLayoutSourceLocale(documentId: string): string {
-  const sourceLocale = lastLoadedEmailLayoutSourceLocale.get(documentId);
-  if (!sourceLocale) {
-    throw new Error(
-      "Email Layout source locale was not captured during load; reload before saving",
-    );
-  }
-  return sourceLocale;
-}
 
 function requireEmailLayoutRevision(
   documentId: string,
@@ -150,4 +128,33 @@ function requireEmailLayoutRevision(
     );
   }
   return revision;
+}
+
+function requireEmailLayoutRevisionTuple(
+  documentName: string,
+  sourceLocale: string,
+  locale: string,
+  localeExists: boolean,
+  documentRevision: string,
+  targetRevision: string | undefined,
+): EmailLayoutRevisionTuple {
+  if (!documentRevision) {
+    throw new Error("Email Layout document revision missing");
+  }
+  if (locale === sourceLocale && targetRevision !== undefined) {
+    throw new Error(
+      "Email Layout source collaboration returned target revision",
+    );
+  }
+  if (locale !== sourceLocale && !targetRevision) {
+    throw new Error("Email Layout target revision missing");
+  }
+  return {
+    documentName,
+    documentRevision,
+    sourceLocale,
+    locale,
+    localeExists,
+    ...(targetRevision === undefined ? {} : { targetRevision }),
+  };
 }

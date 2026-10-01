@@ -18,8 +18,7 @@ import {
 import type { JsonValue } from "@bufbuild/protobuf";
 import type { DocumentLayout } from "@echovisionlab/geul-proto/common/common_pb.ts";
 import type { CollaborationPrincipal } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
-import type * as Y from "yjs";
-import type { ResidentSourceMetadataProjection } from "../api/resident-block-domain.ts";
+import * as Y from "yjs";
 import { logger } from "../logger.ts";
 import {
   CollaborationConflictError,
@@ -42,9 +41,9 @@ import {
 import {
   createResidentBlockGateways,
   type ResidentBlockDomainGateway,
-  type ResidentBlockDomainLoad,
 } from "./resident-block-gateways.ts";
-import { applyResidentSourceMetadataUpdate } from "./resident-block-source-metadata.ts";
+import { ResidentBlockMetadataState } from "./resident-block-metadata-state.ts";
+import { persistResidentBlockWithAcknowledgment } from "./resident-block-durability.ts";
 import {
   assertMetadataScopeAllowed,
   assertResponseLocale,
@@ -60,17 +59,15 @@ import {
   type ResidentInteractiveMutationInput,
 } from "./resident-interactive-mutation.ts";
 
-export type { ResidentBlockMetadataUpdate } from "./resident-block-metadata.ts";
+import type { ResidentBlockBootstrapSnapshot } from "./resident-block-load.ts";
 
-export type { ResidentBlockDomainGateway } from "./resident-block-gateways.ts";
+export type { ResidentBlockBootstrapSnapshot } from "./resident-block-load.ts";
 
-export type { ResidentInteractiveMutationInput } from "./resident-interactive-mutation.ts";
+export type { ResidentBlockMetadataUpdate };
 
-export interface ResidentBlockBootstrapSnapshot extends ResidentBlockDomainLoad {
-  documentName: string;
-  documentType: BlockRoomDocumentType;
-  blockCatalogFingerprint: string;
-}
+export type { ResidentBlockDomainGateway };
+
+export type { ResidentInteractiveMutationInput };
 
 function decodeAffectedBlockRoomChanges(
   document: Y.Doc,
@@ -148,16 +145,9 @@ export class ResidentBlockRuntime {
     JsonValue,
     BlockRoomLocaleData
   >();
+  private readonly metadataState = new ResidentBlockMetadataState();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly acceptedInteractiveOrigins = new WeakSet<object>();
-  private readonly sourceMetadata = new Map<
-    string,
-    ResidentSourceMetadataProjection
-  >();
-  private readonly localeMetadata = new Map<
-    string,
-    ResidentSourceMetadataProjection | undefined
-  >();
   private readonly domainGateways: Record<
     BlockRoomDocumentType,
     ResidentBlockDomainGateway
@@ -190,11 +180,7 @@ export class ResidentBlockRuntime {
     ) {
       throw new Error("resident_room_locale_mismatch");
     }
-    this.sourceMetadata.set(documentName, { ...loaded.sourceMetadata });
-    this.localeMetadata.set(
-      documentName,
-      loaded.localeMetadata ? { ...loaded.localeMetadata } : undefined,
-    );
+    this.metadataState.load(documentName, loaded);
     hydrateCanonicalBlockRoom(
       document,
       documentType,
@@ -295,7 +281,9 @@ export class ResidentBlockRuntime {
     contributorMemberIds: readonly string[],
   ): Promise<ResidentBlockPersistResult> {
     return this.enqueue(documentName, () =>
-      this.persistence.persist(documentName, document, contributorMemberIds),
+      persistResidentBlockWithAcknowledgment(documentName, document, () =>
+        this.persistence.persist(documentName, document, contributorMemberIds),
+      ),
     );
   }
 
@@ -305,7 +293,13 @@ export class ResidentBlockRuntime {
     contributorMemberIds: readonly string[],
   ): Promise<ResidentBlockPersistResult> {
     return this.enqueue(documentName, () =>
-      this.persistence.checkpoint(documentName, document, contributorMemberIds),
+      persistResidentBlockWithAcknowledgment(documentName, document, () =>
+        this.persistence.checkpoint(
+          documentName,
+          document,
+          contributorMemberIds,
+        ),
+      ),
     );
   }
 
@@ -314,11 +308,8 @@ export class ResidentBlockRuntime {
     document: Y.Doc,
     documentLayout: DocumentLayout,
     contributorMemberIds: readonly string[],
-  ): Promise<{
-    documentRevision: string;
-    changed: boolean;
-    sourceChanged: boolean;
-  }> {
+    observedLayout: DocumentLayout,
+  ): Promise<ResidentBlockMetadataAck> {
     return this.enqueue(documentName, async () => {
       const parsed = parseDocumentName(documentName);
       if (parsed.type !== CollaborativeDocumentType.PAGE) {
@@ -337,12 +328,17 @@ export class ResidentBlockRuntime {
         );
       }
       const contributors = [...new Set(contributorMemberIds)].sort();
+      const canonicalLayout = this.metadataState.mergePageLayout(
+        documentName,
+        documentLayout,
+        observedLayout,
+      );
       const response = await gateway.updatePageDocumentLayout(
         parsed.entityId,
         parsed.locale,
         {
           expectedDocumentRevision: metadata.documentRevision,
-          documentLayout,
+          documentLayout: canonicalLayout,
           contributorMemberIds: contributors,
         },
       );
@@ -358,7 +354,15 @@ export class ResidentBlockRuntime {
         metadata.documentRevision,
         response.documentRevision,
       );
-      return response;
+      return {
+        ...response,
+        locale: metadata.locale,
+        changedLocales: [],
+        metadataUpdate: this.metadataState.acknowledgePageLayout(
+          documentName,
+          canonicalLayout,
+        ),
+      };
     });
   }
 
@@ -385,11 +389,15 @@ export class ResidentBlockRuntime {
         throw new Error(`resident_document_not_loaded:${documentName}`);
       assertMetadataScopeAllowed(metadata, update);
       const contributors = [...new Set(contributorMemberIds)].sort();
+      const canonicalUpdate = this.metadataState.mergeUpdate(
+        documentName,
+        update,
+      );
       const response = await invokeMetadataUpdate(
         gateway.updateMetadata,
         parsed.entityId,
         parsed.locale,
-        update,
+        canonicalUpdate,
         metadata,
         contributors,
       );
@@ -401,15 +409,13 @@ export class ResidentBlockRuntime {
         response.documentRevision,
         response.targetRevision,
       );
-      const next = applyResidentSourceMetadataUpdate(
-        this.localeMetadata.get(documentName),
-        update,
+      const metadataUpdate = this.metadataState.acknowledge(
+        documentName,
+        canonicalUpdate,
+        metadata.sourceLocale,
+        parsed.locale,
       );
-      this.localeMetadata.set(documentName, next);
-      if (parsed.locale === metadata.sourceLocale && next) {
-        this.sourceMetadata.set(documentName, next);
-      }
-      return response;
+      return { ...response, metadataUpdate };
     });
   }
 
@@ -464,16 +470,12 @@ export class ResidentBlockRuntime {
       documentRevision: metadata.documentRevision,
       presentLocaleValues: blockRoomPresentLocaleValues(document),
       blockCatalogFingerprint: metadata.blockCatalogFingerprint,
-      sourceMetadata: this.sourceMetadata.get(documentName)!,
-      ...(this.localeMetadata.get(documentName) === undefined
-        ? {}
-        : { localeMetadata: this.localeMetadata.get(documentName) }),
+      ...this.metadataState.bootstrap(documentName),
     };
   }
 
   unload(documentName: string): void {
-    this.sourceMetadata.delete(documentName);
-    this.localeMetadata.delete(documentName);
+    this.metadataState.clear(documentName);
     this.persistence.unregisterDocument(documentName);
   }
 
@@ -483,13 +485,17 @@ export class ResidentBlockRuntime {
     options: DocumentSaveOptions,
   ): Promise<ResidentBlockPersistResult> {
     const contributorMemberIds = options.contributorMemberIds ?? [];
-    return options.versionCheckpoint
-      ? this.persistence.checkpointAcknowledged(
-          documentName,
-          document,
-          contributorMemberIds,
-        )
-      : this.persistence.persist(documentName, document, contributorMemberIds);
+    // A version checkpoint captures only an already acknowledged revision.
+    // It must not acknowledge any newer room body that has not reached storage.
+    if (options.versionCheckpoint)
+      return this.persistence.checkpointAcknowledged(
+        documentName,
+        document,
+        contributorMemberIds,
+      );
+    return persistResidentBlockWithAcknowledgment(documentName, document, () =>
+      this.persistence.persist(documentName, document, contributorMemberIds),
+    );
   }
 
   private enqueue<T>(

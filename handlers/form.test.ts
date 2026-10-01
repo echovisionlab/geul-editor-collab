@@ -7,6 +7,10 @@ import {
 } from "@echovisionlab/geul-common/collaboration/document";
 import type { FormCollabFields } from "@echovisionlab/geul-common/collaboration/form";
 import { clearTransientDocumentState } from "../lib/transient-document-state.ts";
+import {
+  DOCUMENT_ROOM_SNAPSHOT_KEYS,
+  DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { formHandler } from "./form.ts";
 
 vi.mock("../lib/api/form.ts", () => ({
@@ -90,6 +94,16 @@ describe("formHandler canonical collaboration persistence", () => {
   it("hydrates source canonical state and saves canonical post-state without Yjs bytes", async () => {
     const { saveFormDocument } = await import("../lib/api/form.ts");
     const document = decode(await load());
+    const observed = document.getMap<string | boolean>(
+      DOCUMENT_ROOM_SNAPSHOT_MAP_NAME,
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentName)).toBe(room());
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentRevision)).toBe(
+      revision(1),
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.sourceLocale)).toBe("en");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.locale)).toBe("en");
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.localeExists)).toBe(true);
     document.getMap("form-fields").set("title", "Updated");
 
     await formHandler.store(room(), document, {
@@ -106,6 +120,9 @@ describe("formHandler canonical collaboration persistence", () => {
     });
     expect(vi.mocked(saveFormDocument).mock.calls[0]?.[0]).not.toHaveProperty(
       "yjsState",
+    );
+    expect(observed.get(DOCUMENT_ROOM_SNAPSHOT_KEYS.documentRevision)).toBe(
+      revision(sequence + 100),
     );
   });
 

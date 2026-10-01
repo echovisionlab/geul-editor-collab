@@ -200,6 +200,10 @@ function pageDocument(locale = "ko") {
   });
 }
 
+function emptyDocumentLayout() {
+  return create(DocumentLayoutSchema, {});
+}
+
 function immersivePageDocument() {
   return fromJson(LocalizedPageDocumentSchema, {
     blockCatalogFingerprint: contentBlockCatalogFingerprint,
@@ -349,6 +353,17 @@ function loadedDocument(
     localeMetadata: { locale: document.locale, title: "Old" },
     sourceLocale: "ko",
     locale: document.locale,
+    ...(document.$typeName === "api.content.v1.LocalizedPageDocument"
+      ? {
+          documentMetadata: {
+            documentLayout: toJson(
+              DocumentLayoutSchema,
+              emptyDocumentLayout(),
+              { alwaysEmitImplicit: true },
+            ),
+          },
+        }
+      : {}),
     localeExists: true,
     presentLocaleValues:
       document.$typeName === "api.content.v1.LocalizedRichTextDocument"
@@ -1012,6 +1027,7 @@ describe("ResidentBlockRuntime source room", () => {
         pageRoom,
         fromJson(DocumentLayoutSchema, {}),
         ["member-1"],
+        emptyDocumentLayout(),
       ),
     ).rejects.toMatchObject({
       reason: "non_source_document_metadata_forbidden",
@@ -1128,7 +1144,13 @@ describe("ResidentBlockRuntime source room", () => {
     });
     await runtime.load(name, room, PRINCIPAL);
     await expect(
-      runtime.updatePageDocumentLayout(name, room, layout, ["b", "a", "b"]),
+      runtime.updatePageDocumentLayout(
+        name,
+        room,
+        layout,
+        ["b", "a", "b"],
+        emptyDocumentLayout(),
+      ),
     ).resolves.toMatchObject({ documentRevision: "revision-2" });
     expect(updatePageDocumentLayout).toHaveBeenCalledWith(ENTITY_ID, "ko", {
       expectedDocumentRevision: "revision-1",
@@ -1138,6 +1160,57 @@ describe("ResidentBlockRuntime source room", () => {
     expect(runtime.bootstrap(name, room)).toMatchObject({
       documentRevision: "revision-2",
     });
+  });
+
+  it("rejects Page layout writes without an observed or loaded canonical baseline", async () => {
+    const updatePageDocumentLayout = vi.fn().mockResolvedValue({
+      documentRevision: "revision-2",
+      changed: true,
+      sourceChanged: false,
+      locale: "ko",
+    });
+    const runtime = new ResidentBlockRuntime({
+      page: gateway({
+        load: vi.fn().mockResolvedValue(loadedDocument(pageDocument())),
+        updatePageDocumentLayout,
+      }),
+    });
+    const room = new Y.Doc();
+    const name = `page:${ENTITY_ID}:ko`;
+    await runtime.load(name, room, PRINCIPAL);
+
+    await expect(
+      runtime.updatePageDocumentLayout(
+        name,
+        room,
+        emptyDocumentLayout(),
+        ["member-1"],
+        undefined as never,
+      ),
+    ).rejects.toThrow("metadata_observed_layout_required");
+    expect(updatePageDocumentLayout).not.toHaveBeenCalled();
+
+    const missingLayoutRuntime = new ResidentBlockRuntime({
+      page: gateway({
+        load: vi.fn().mockResolvedValue({
+          ...loadedDocument(pageDocument()),
+          documentMetadata: {},
+        }),
+        updatePageDocumentLayout,
+      }),
+    });
+    const missingLayoutRoom = new Y.Doc();
+    await missingLayoutRuntime.load(name, missingLayoutRoom, PRINCIPAL);
+    await expect(
+      missingLayoutRuntime.updatePageDocumentLayout(
+        name,
+        missingLayoutRoom,
+        emptyDocumentLayout(),
+        ["member-1"],
+        emptyDocumentLayout(),
+      ),
+    ).rejects.toThrow("resident_page_layout_not_loaded");
+    expect(updatePageDocumentLayout).not.toHaveBeenCalled();
   });
 
   it("requires canonical resident types, loaded state, and optional metadata gateways", async () => {
@@ -1155,6 +1228,7 @@ describe("ResidentBlockRuntime source room", () => {
         room,
         fromJson(DocumentLayoutSchema, {}),
         [],
+        emptyDocumentLayout(),
       ),
     ).rejects.toThrow("resident_page_type_required");
     await expect(
@@ -1195,6 +1269,7 @@ describe("ResidentBlockRuntime source room", () => {
         pageRoom,
         fromJson(DocumentLayoutSchema, {}),
         [],
+        emptyDocumentLayout(),
       ),
     ).rejects.toThrow("resident_page_metadata_gateway_required");
   });
@@ -1240,6 +1315,7 @@ describe("ResidentBlockRuntime source room", () => {
               room,
               fromJson(DocumentLayoutSchema, {}),
               [],
+              emptyDocumentLayout(),
             )
           : runtime.updateMetadata(
               documentName,
@@ -1285,6 +1361,7 @@ describe("ResidentBlockRuntime source room", () => {
             room,
             fromJson(DocumentLayoutSchema, {}),
             [],
+            emptyDocumentLayout(),
           )
         : runtime.updateMetadata(
             documentName,
@@ -1381,6 +1458,7 @@ describe("ResidentBlockRuntime source room", () => {
         new Y.Doc(),
         fromJson(DocumentLayoutSchema, {}),
         [],
+        emptyDocumentLayout(),
       ),
     ).rejects.toThrow("resident_document_not_loaded");
   });
@@ -1434,4 +1512,222 @@ describe("ResidentBlockRuntime source room", () => {
     await runtime.persist(name, room, ["member-1"]);
     expect(domain.save).toHaveBeenCalled();
   });
+});
+
+describe("resident metadata intent", () => {
+  it("merges stale taxonomy membership while preserving unseen peer additions and deletions", async () => {
+    let revision = 1;
+    const updateMetadata = vi.fn(
+      async (
+        ...args: Parameters<
+          NonNullable<ResidentBlockDomainGateway["updateMetadata"]>
+        >
+      ) => (
+        void args,
+        {
+          documentRevision: `revision-${++revision}`,
+          changed: true,
+          sourceChanged: false,
+          changedLocales: [],
+          locale: "ko",
+        }
+      ),
+    );
+    const runtime = new ResidentBlockRuntime({
+      post: gateway({
+        load: vi.fn().mockResolvedValue({
+          ...loadedDocument(sourceDocument()),
+          documentMetadata: { categoryIds: ["old"], tagIds: [] },
+        }),
+        updateMetadata,
+      }),
+    });
+    const room = new Y.Doc();
+    await runtime.load(DOCUMENT_NAME, room, PRINCIPAL);
+    await runtime.updateMetadata(
+      DOCUMENT_NAME,
+      room,
+      {
+        type: "post",
+        scope: "document",
+        categoryIds: ["peer"],
+        observed: { categoryIds: ["old"] },
+      },
+      ["a"],
+    );
+    const result = await runtime.updateMetadata(
+      DOCUMENT_NAME,
+      room,
+      {
+        type: "post",
+        scope: "document",
+        categoryIds: ["old", "mine"],
+        observed: { categoryIds: ["old"] },
+      },
+      ["b"],
+    );
+    expect(updateMetadata.mock.calls.at(-1)?.[2]).toMatchObject({
+      categoryIds: ["peer", "mine"],
+    });
+    expect(result.metadataUpdate).toEqual({
+      operation: "document",
+      sequence: 2,
+      values: { categoryIds: ["peer", "mine"] },
+    });
+    room.destroy();
+  });
+
+  it("merges stale layout properties and broadcasts a complete canonical layout ACK", async () => {
+    const initial = fromJson(DocumentLayoutSchema, {});
+    let revision = 1;
+    const update = vi.fn(
+      async (
+        ...args: Parameters<
+          NonNullable<ResidentBlockDomainGateway["updatePageDocumentLayout"]>
+        >
+      ) => (
+        void args,
+        {
+          documentRevision: `revision-${++revision}`,
+          changed: true,
+          sourceChanged: false,
+          locale: "ko",
+        }
+      ),
+    );
+    const runtime = new ResidentBlockRuntime({
+      page: gateway({
+        load: vi.fn().mockResolvedValue({
+          ...loadedDocument(pageDocument()),
+          documentMetadata: {
+            documentLayout: toJson(DocumentLayoutSchema, initial, {
+              alwaysEmitImplicit: true,
+            }),
+          },
+        }),
+        updatePageDocumentLayout: update,
+      }),
+    });
+    const room = new Y.Doc();
+    const name = `page:${ENTITY_ID}:ko`;
+    await runtime.load(name, room, PRINCIPAL);
+    await runtime.updatePageDocumentLayout(
+      name,
+      room,
+      fromJson(DocumentLayoutSchema, {
+        contentHeight: "DOCUMENT_CONTENT_HEIGHT_VIEWPORT",
+      }),
+      ["a"],
+      initial,
+    );
+    const ack = await runtime.updatePageDocumentLayout(
+      name,
+      room,
+      fromJson(DocumentLayoutSchema, {
+        pageChrome: "DOCUMENT_REGION_PLACEMENT_PINNED",
+      }),
+      ["b"],
+      initial,
+    );
+    expect(update.mock.calls.at(-1)?.[2].documentLayout).toMatchObject({
+      contentHeight: 2,
+      pageChrome: 2,
+    });
+    expect(ack).toMatchObject({
+      locale: "ko",
+      changedLocales: [],
+      metadataUpdate: {
+        operation: "page_layout",
+        sequence: 2,
+        values: {
+          documentLayout: {
+            contentHeight: "DOCUMENT_CONTENT_HEIGHT_VIEWPORT",
+            pageChrome: "DOCUMENT_REGION_PLACEMENT_PINNED",
+          },
+        },
+      },
+    });
+    room.destroy();
+  });
+});
+
+it("broadcasts only durable pre-save clocks, excluding later authoring", async () => {
+  let finish!: (value: {
+    documentRevision: string;
+    changed: boolean;
+    sourceChanged: boolean;
+    locale: string;
+  }) => void;
+  const save = vi.fn(
+    () =>
+      new Promise<{
+        documentRevision: string;
+        changed: boolean;
+        sourceChanged: boolean;
+        locale: string;
+      }>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const runtime = new ResidentBlockRuntime({ post: gateway({ save }) });
+  const room = new Y.Doc();
+  const broadcast = vi.fn();
+  Object.assign(room, { broadcastStateless: broadcast });
+  await runtime.load(DOCUMENT_NAME, room, PRINCIPAL);
+  const text = getBlockRoomCollaborativeText(room, {
+    id: BLOCK_ID,
+    family: "rich_text",
+    locale: true,
+    path: "content[0].text.text",
+  });
+  text.insert(text.length, " saved");
+  const captured = Y.encodeStateVector(room);
+  const saving = runtime.persist(DOCUMENT_NAME, room, ["a"]);
+  await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+  text.insert(text.length, " pending");
+  finish({
+    documentRevision: "revision-2",
+    changed: true,
+    sourceChanged: true,
+    locale: "ko",
+  });
+  await saving;
+  const ack = JSON.parse(broadcast.mock.calls[0][0]);
+  expect(Buffer.from(ack.stateVector, "base64")).toEqual(Buffer.from(captured));
+  expect(ack).toMatchObject({
+    kind: "block_room.persisted",
+    documentName: DOCUMENT_NAME,
+    deleted: expect.any(Object),
+  });
+  expect(Buffer.from(ack.stateVector, "base64")).not.toEqual(
+    Buffer.from(Y.encodeStateVector(room)),
+  );
+  room.destroy();
+});
+
+it("does not acknowledge unsaved room body when checkpointing an accepted revision", async () => {
+  const save = vi.fn();
+  const checkpoint = vi.fn().mockResolvedValue({});
+  const runtime = new ResidentBlockRuntime({
+    post: gateway({ save, checkpoint }),
+  });
+  const room = new Y.Doc();
+  const broadcast = vi.fn();
+  Object.assign(room, { broadcastStateless: broadcast });
+  await runtime.load(DOCUMENT_NAME, room, PRINCIPAL);
+  const text = getBlockRoomCollaborativeText(room, {
+    id: BLOCK_ID,
+    family: "rich_text",
+    locale: true,
+    path: "content[0].text.text",
+  });
+  text.insert(text.length, " not yet persisted");
+  await runtime.persistEditSession(DOCUMENT_NAME, room, {
+    versionCheckpoint: true,
+    contributorMemberIds: ["a"],
+  });
+  expect(checkpoint).toHaveBeenCalledOnce();
+  expect(save).not.toHaveBeenCalled();
+  expect(broadcast).not.toHaveBeenCalled();
+  room.destroy();
 });

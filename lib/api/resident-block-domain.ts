@@ -1,3 +1,4 @@
+import type { JsonValue } from "@bufbuild/protobuf";
 import type { BlockRoomDocumentType } from "@echovisionlab/geul-common/collaboration/block-room-codec";
 import type { CollaborationPrincipal } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
 import type { AIDocumentFieldTarget } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
@@ -31,6 +32,7 @@ export interface ResidentRichTextDocumentLoad {
   presentLocaleValues: readonly AIDocumentFieldTarget[];
   sourceMetadata: ResidentSourceMetadataProjection;
   localeMetadata?: ResidentSourceMetadataProjection;
+  documentMetadata?: Record<string, JsonValue>;
 }
 
 export interface ResidentRichTextDocumentAck {
