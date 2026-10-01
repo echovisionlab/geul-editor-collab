@@ -16,6 +16,7 @@ function fixture(
       sourceDocument: { documentName: "post:post-1", document: {} },
       contributorMemberIds: ["member"],
       canContinue,
+      isCurrent: () => true,
       sourceDocumentIsCurrent,
       persistWith,
       withPersistenceQueue: async (
@@ -37,7 +38,9 @@ describe("source-only edit session checkpoint finalizer", () => {
 
   it("stops before persistence when the generation is stale", async () => {
     const { options, persistWith } = fixture(() => false);
-    await expect(persistEditSessionCheckpoint(options)).resolves.toBe(false);
+    await expect(
+      persistEditSessionCheckpoint(options),
+    ).resolves.toBeUndefined();
     expect(persistWith).not.toHaveBeenCalled();
   });
 
@@ -47,8 +50,17 @@ describe("source-only edit session checkpoint finalizer", () => {
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
     const { options, persistWith } = fixture(canContinue);
-    await expect(persistEditSessionCheckpoint(options)).resolves.toBe(false);
+    await expect(
+      persistEditSessionCheckpoint(options),
+    ).resolves.toBeUndefined();
     expect(persistWith).toHaveBeenCalledOnce();
+  });
+
+  it("returns the source document only after its checkpoint completes", async () => {
+    const { options } = fixture();
+    await expect(persistEditSessionCheckpoint(options)).resolves.toBe(
+      options.sourceDocument,
+    );
   });
 
   it("rejects a source document that is no longer current after checkpoint", async () => {

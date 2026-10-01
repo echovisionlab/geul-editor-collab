@@ -82,8 +82,15 @@ export class EditSessionDocumentRegistry<TDocument extends ConnectedDocument> {
   sourceDocumentIsCurrent(
     entityDocumentName: string,
     documentName: string,
+    document: TDocument,
   ): boolean {
-    return documentName === entityDocumentName;
+    return (
+      documentName === entityDocumentName &&
+      [...this.options.listDocuments()].some(
+        ([currentDocumentName, currentDocument]) =>
+          currentDocumentName === documentName && currentDocument === document,
+      )
+    );
   }
 
   allForEntity(

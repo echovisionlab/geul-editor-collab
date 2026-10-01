@@ -33,6 +33,16 @@ function acceptedChange(documentName: string, memberId: string) {
   };
 }
 
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = () => resolvePromise();
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 describe("source-only edit session contributors", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -611,6 +621,175 @@ describe("source-only edit session contributors", () => {
     expect(onEntityDeleted).not.toHaveBeenCalled();
     expect(unloadDocument).toHaveBeenCalledWith(source);
     expect(tracker.contributorMemberIds(name)).toEqual([]);
+  });
+
+  it.each(["succeeds", "fails"] as const)(
+    "keeps a replacement session after an invalidated checkpoint %s",
+    async (outcome) => {
+      const {
+        documents,
+        name,
+        persistDocument,
+        source,
+        tracker,
+        unloadDocument,
+      } = setup();
+      const checkpointStarted = deferred();
+      const checkpoint = deferred();
+      persistDocument.mockImplementation(
+        async (_documentName, _document, saveOptions) => {
+          if (!saveOptions.versionCheckpoint) {
+            return;
+          }
+          checkpointStarted.resolve();
+          await checkpoint.promise;
+        },
+      );
+
+      tracker.recordAcceptedChange(acceptedChange(name, "old-member"));
+      tracker.disconnected(name);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await checkpointStarted.promise;
+
+      await tracker.resourceInvalidated(name);
+      documents.delete(name);
+      tracker.documentUnloaded(name);
+
+      const replacement = fakeDocument();
+      documents.set(name, replacement);
+      tracker.recordAcceptedChange(acceptedChange(name, "new-member"));
+      expect(tracker.preventsUnload(name)).toBe(true);
+
+      if (outcome === "succeeds") {
+        checkpoint.resolve();
+      } else {
+        checkpoint.reject(new Error("checkpoint unavailable"));
+      }
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(tracker.preventsUnload(name)).toBe(true);
+      expect(tracker.contributorMemberIds(name)).toEqual(["new-member"]);
+      expect(unloadDocument).toHaveBeenCalledTimes(1);
+      expect(unloadDocument).toHaveBeenCalledWith(source);
+      expect(vi.getTimerCount()).toBe(1);
+    },
+  );
+
+  it("drains the current generation while an invalidated checkpoint is still pending", async () => {
+    const {
+      documents,
+      name,
+      persistDocument,
+      source,
+      tracker,
+      unloadDocument,
+    } = setup();
+    const oldCheckpointStarted = deferred();
+    const oldCheckpoint = deferred();
+    const currentCheckpointStarted = deferred();
+    const currentCheckpoint = deferred();
+    let checkpointCount = 0;
+    persistDocument.mockImplementation(
+      async (_documentName, _document, saveOptions) => {
+        if (!saveOptions.versionCheckpoint) {
+          return;
+        }
+        checkpointCount += 1;
+        if (checkpointCount === 1) {
+          oldCheckpointStarted.resolve();
+          await oldCheckpoint.promise;
+        } else if (checkpointCount === 2) {
+          currentCheckpointStarted.resolve();
+          await currentCheckpoint.promise;
+        }
+      },
+    );
+
+    tracker.recordAcceptedChange(acceptedChange(name, "old-member"));
+    tracker.disconnected(name);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await oldCheckpointStarted.promise;
+
+    await tracker.resourceInvalidated(name);
+    documents.delete(name);
+    tracker.documentUnloaded(name);
+    const replacement = fakeDocument();
+    documents.set(name, replacement);
+    tracker.recordAcceptedChange(acceptedChange(name, "new-member"));
+    tracker.disconnected(name);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await currentCheckpointStarted.promise;
+    replacement.connections.push({});
+
+    tracker.beginShutdown();
+    let shutdownSettled = false;
+    const shutdown = tracker.drainForShutdown().then(() => {
+      shutdownSettled = true;
+    });
+    currentCheckpoint.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shutdownSettled).toBe(false);
+    expect(checkpointCount).toBe(2);
+
+    oldCheckpoint.resolve();
+    await shutdown;
+
+    expect(checkpointCount).toBe(2);
+    expect(persistDocument).toHaveBeenCalledWith(
+      name,
+      replacement,
+      expect.objectContaining({
+        contributorMemberIds: ["new-member"],
+        versionCheckpoint: true,
+      }),
+    );
+    expect(unloadDocument).toHaveBeenCalledWith(source);
+    expect(unloadDocument).not.toHaveBeenCalledWith(replacement);
+  });
+
+  it("does not unload a replacement document when the prior session settles", async () => {
+    const onEntitySettled = vi.fn();
+    const { documents, name, tracker, unloadDocument } = setup({
+      onEntitySettled,
+    });
+    const replacement = fakeDocument();
+    onEntitySettled.mockImplementation(() => {
+      documents.set(name, replacement);
+    });
+
+    tracker.recordAcceptedChange(acceptedChange(name, "member-1"));
+    tracker.disconnected(name);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(onEntitySettled).toHaveBeenCalledWith(name);
+    expect(documents.get(name)).toBe(replacement);
+    expect(unloadDocument).not.toHaveBeenCalledWith(replacement);
+  });
+
+  it("keeps the source resident when settlement immediately starts a new session", async () => {
+    const trackerReference: {
+      current: EditSessionContributorTracker<FakeDocument> | undefined;
+    } = { current: undefined };
+    const context = setup({
+      onEntitySettled(documentName) {
+        trackerReference.current?.recordAcceptedChange(
+          acceptedChange(documentName, "replacement-member"),
+        );
+      },
+    });
+    trackerReference.current = context.tracker;
+
+    context.tracker.recordAcceptedChange(
+      acceptedChange(context.name, "old-member"),
+    );
+    context.tracker.disconnected(context.name);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(context.tracker.contributorMemberIds(context.name)).toEqual([
+      "replacement-member",
+    ]);
+    expect(context.unloadDocument).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
   });
 
   it("rejects later persistence after terminal source deletion", async () => {

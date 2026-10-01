@@ -17,8 +17,8 @@ importers:
         specifier: ^2.1.2
         version: 2.1.2(@bufbuild/protobuf@2.14.0)(@connectrpc/connect@2.1.2(@bufbuild/protobuf@2.14.0))
       "@echovisionlab/geul-common":
-        specifier: 0.3.0
-        version: 0.3.0(yjs@13.6.32)
+        specifier: 0.3.1
+        version: 0.3.1(yjs@13.6.32)
       "@echovisionlab/geul-event":
         specifier: 0.3.0
         version: 0.3.0(@echovisionlab/geul-proto@0.3.0)
@@ -271,10 +271,10 @@ packages:
       }
     engines: { node: ">=20.19.0" }
 
-  "@echovisionlab/geul-common@0.3.0":
+  "@echovisionlab/geul-common@0.3.1":
     resolution:
       {
-        integrity: sha512-27sqyYRqxhhZcvgaGFUd4LmWaNEBDdorFYkjpX0OIm1VwL1RndUtP1qiMnyW3T00RxW0gDNwlvtTA7Rn/p9bZA==,
+        integrity: sha512-yFi1FMTudrI8lHA7Cj+a4KUbstK2dzMtxWM/+UIR6txUVes7NMj1LU1mcZVAahtlxyBqN5iU5chRjW5nrUaRDg==,
       }
     engines: { node: 24.19.0 }
     peerDependencies:
@@ -3388,6 +3388,13 @@ packages:
         integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==,
       }
 
+  diff@9.0.0:
+    resolution:
+      {
+        integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==,
+      }
+    engines: { node: ">=0.3.1" }
+
   eastasianwidth@0.2.0:
     resolution:
       {
@@ -5465,10 +5472,11 @@ snapshots:
 
   "@csstools/css-tokenizer@4.0.0": {}
 
-  "@echovisionlab/geul-common@0.3.0(yjs@13.6.32)":
+  "@echovisionlab/geul-common@0.3.1(yjs@13.6.32)":
     dependencies:
       "@bufbuild/protobuf": 2.14.0
       "@echovisionlab/geul-proto": 0.3.0
+      diff: 9.0.0
       yjs: 13.6.32
       zod: 4.4.3
 
@@ -7256,6 +7264,8 @@ snapshots:
   devlop@1.1.0:
     dependencies:
       dequal: 2.0.3
+
+  diff@9.0.0: {}
 
   eastasianwidth@0.2.0: {}
 

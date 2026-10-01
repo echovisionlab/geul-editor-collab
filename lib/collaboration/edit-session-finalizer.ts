@@ -18,7 +18,8 @@ export interface EditSessionFinalizationOptions<TDocument> {
   sourceDocument: CheckpointDocument<TDocument> | undefined;
   contributorMemberIds: string[];
   canContinue(): boolean;
-  sourceDocumentIsCurrent(documentName: string): boolean;
+  isCurrent(): boolean;
+  sourceDocumentIsCurrent(documentName: string, document: TDocument): boolean;
   persistWith(
     persistDocument: PersistDocument<TDocument>,
     documentName: string,
@@ -33,8 +34,8 @@ export interface EditSessionFinalizationOptions<TDocument> {
 
 export async function persistEditSessionCheckpoint<TDocument>(
   options: EditSessionFinalizationOptions<TDocument>,
-): Promise<boolean> {
-  let completed = false;
+): Promise<CheckpointDocument<TDocument> | undefined> {
+  let completedSource: CheckpointDocument<TDocument> | undefined;
   await options.withPersistenceQueue(
     options.entityDocumentName,
     async (persistDocument) => {
@@ -65,13 +66,18 @@ export async function persistEditSessionCheckpoint<TDocument>(
           versionCheckpoint: true,
         },
       );
-      if (!options.sourceDocumentIsCurrent(source.documentName)) {
+      if (!options.isCurrent()) {
+        return;
+      }
+      if (
+        !options.sourceDocumentIsCurrent(source.documentName, source.document)
+      ) {
         throw new Error("source_document_unavailable");
       }
-      completed = true;
+      completedSource = source;
     },
   );
-  return completed;
+  return completedSource;
 }
 
 export function finalizationFailureReason(
