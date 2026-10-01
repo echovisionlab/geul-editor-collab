@@ -2,6 +2,17 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.3.0](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.4...v0.3.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* serialize editor intent and acknowledge canonical state ([#19](https://github.com/echovisionlab/geul-editor-collab/issues/19))
+
+### Bug Fixes
+
+* serialize editor intent and acknowledge canonical state ([#19](https://github.com/echovisionlab/geul-editor-collab/issues/19)) ([8cfa941](https://github.com/echovisionlab/geul-editor-collab/commit/8cfa9419795e9eb0fadf769954211bf3fc9a50bc))
+
 ## [0.2.4](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.3...v0.2.4) (2026-10-01)
 
 
