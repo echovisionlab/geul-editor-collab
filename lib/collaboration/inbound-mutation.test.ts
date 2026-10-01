@@ -1,6 +1,7 @@
 import {
   Connection,
   Document,
+  Hocuspocus,
   IncomingMessage,
   MessageReceiver,
   OutgoingMessage,
@@ -187,9 +188,6 @@ function expectDeleteSetCoverage(
 }
 
 async function residentPostFixture() {
-  const document = new Document(name);
-  const broadcast = vi.fn();
-  Object.assign(document, { broadcastStateless: broadcast });
   let revision = 1;
   const gateway = {
     load: vi.fn().mockResolvedValue({
@@ -218,18 +216,13 @@ async function residentPostFixture() {
     })),
   };
   const runtime = new ResidentBlockRuntime({ post: gateway as never });
-  await runtime.load(
-    name,
-    document,
-    create(CollaborationPrincipalSchema, {
-      sessionId: "33333333-3333-4333-8333-333333333333",
-    }),
-  );
-  const persistEditSession = vi.spyOn(runtime, "persistEditSession");
-  const documents = new Map([[name, document]]);
+  const principal = create(CollaborationPrincipalSchema, {
+    sessionId: "33333333-3333-4333-8333-333333333333",
+  });
+  const documents = new Map<string, Document>();
   const tracker = new EditSessionContributorTracker<Document>({
     listDocuments: () => documents,
-    loadDocument: async () => document,
+    loadDocument: async (documentName) => documents.get(documentName) ?? null,
     persistDocument: (documentName, savedDocument, options) =>
       runtime.persistEditSession(documentName, savedDocument, options),
     withPersistenceQueue: (queueKey, operation) =>
@@ -249,10 +242,32 @@ async function residentPostFixture() {
     isDocumentFenced: () => false,
     settlePendingRoomInvalidation: async () => undefined,
   });
-  const store = createDocumentHooks({
+  const blockRooms = { handleStateless: vi.fn().mockResolvedValue(false) };
+  const documentHooks = createDocumentHooks({
     editSessions: () => tracker,
+    blockRooms,
     revisionConflicts: { isStale: () => false, handle: () => false },
-  } as never).onStoreDocument!;
+  } as never);
+  const afterStore = vi.fn();
+  const hocuspocus = new Hocuspocus({
+    debounce: 2_000,
+    maxDebounce: 10_000,
+    onLoadDocument: async ({ document }) =>
+      runtime.load(name, document, principal),
+    onChange: documentHooks.onChange,
+    onStoreDocument: documentHooks.onStoreDocument,
+    afterStoreDocument: afterStore,
+    onStateless: documentHooks.onStateless,
+  });
+  const document = await hocuspocus.createDocument(
+    name,
+    new Request("http://collab.test"),
+    "server",
+    { isAuthenticated: true, readOnly: false } as never,
+  );
+  documents.set(name, document);
+  const broadcast = vi.spyOn(document, "broadcastStateless");
+  const persistEditSession = vi.spyOn(runtime, "persistEditSession");
   function connection(memberId: string) {
     const socket = { readyState: 1, send: vi.fn(), close: vi.fn() };
     const context = {
@@ -281,15 +296,18 @@ async function residentPostFixture() {
   cleanups.push(() => {
     tracker.release();
     runtime.unload(name);
+    hocuspocus.documents.delete(name);
     document.destroy();
   });
   return {
+    afterStore,
     broadcast,
     connection,
     document,
+    documentHooks,
     gateway,
+    hocuspocus,
     persistEditSession,
-    store,
   };
 }
 
@@ -345,12 +363,12 @@ describe("inbound document actor lane at the Hocuspocus MessageReceiver boundary
       expectedContributors,
     }) => {
       const {
+        afterStore,
         broadcast,
         connection,
         document,
         gateway,
         persistEditSession,
-        store,
       } = await residentPostFixture();
       const clientB = new Y.Doc();
       const clientA = new Y.Doc();
@@ -382,7 +400,9 @@ describe("inbound document actor lane at the Hocuspocus MessageReceiver boundary
         expect(insertAcknowledgement.deleted).toEqual({});
       }
 
-      await store({ documentName: name, document } as never);
+      await vi.waitFor(() => expect(afterStore).toHaveBeenCalledOnce(), {
+        timeout: 3_000,
+      });
 
       const acknowledgements = broadcast.mock.calls.map(
         ([payload]) =>
@@ -410,6 +430,53 @@ describe("inbound document actor lane at the Hocuspocus MessageReceiver boundary
       clientB.destroy();
     },
   );
+
+  it("keeps an un-attributed autosave and persist-now from claiming a durable ACK", async () => {
+    const {
+      afterStore,
+      broadcast,
+      connection,
+      document,
+      documentHooks,
+      gateway,
+      persistEditSession,
+    } = await residentPostFixture();
+    const client = connection("member-A");
+
+    document.transact(() => postText(document).insert(4, " local"), {
+      source: "local",
+    });
+    await vi.waitFor(() => expect(afterStore).toHaveBeenCalledOnce(), {
+      timeout: 3_000,
+    });
+
+    expect(gateway.save).not.toHaveBeenCalled();
+    expect(persistEditSession).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+
+    const sendStateless = vi
+      .spyOn(client, "sendStateless")
+      .mockImplementation(() => undefined);
+    await documentHooks.onStateless!({
+      connection: client,
+      documentName: name,
+      document,
+      payload: JSON.stringify({
+        kind: "persist.now.request",
+        requestId: "44444444-4444-4444-8444-444444444444",
+      }),
+    } as never);
+
+    expect(sendStateless).toHaveBeenCalledWith(
+      JSON.stringify({
+        kind: "persist.now.ack",
+        requestId: "44444444-4444-4444-8444-444444444444",
+        ok: true,
+      }),
+    );
+    expect(gateway.save).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
 
   it("keeps the second actor out while the first actor's durable write is pending", async () => {
     const { document, persist, connection } = fixture();
