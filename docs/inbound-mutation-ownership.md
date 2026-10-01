@@ -27,3 +27,23 @@ MessageReceiver, simultaneous frames, delayed and failed durable writes,
 retries, validation rejection and duplicate replay. Upgrading Hocuspocus requires
 these boundary tests to continue passing. This test is a local protocol and
 persistence boundary test; it does not use production sockets or a database.
+
+The Post boundary also exercises an insert followed by a peer deletion through
+the resident runtime and the actual store hook. Different actors persist the
+insert before applying the deletion; the same actor can return to the original
+canonical body without a database mutation. Both paths broadcast a persisted
+ACK covering the inserted clocks and deleted ranges. This test calls the store
+hook directly and does not exercise the debounce scheduler.
+
+Awareness is connection-owned presence, separate from document mutations.
+Providers can send a null state for a peer whose heartbeat expired locally.
+That frame must not disconnect the sender or remove the peer's server presence.
+Only an owning connection's null state removes presence; a foreign non-null
+update remains rejected. Hocuspocus 4.6 scratch decoding discards null entries,
+so authorized removals are applied before that decoding boundary.
+
+On 2026-10-02, production Post QA exposed repeated connection closures with
+`Awareness client ID belongs to another connection`. The real Awareness timer
+and MessageReceiver regression reproduced the foreign-null rejection before
+the fix and preserved the server-owned peer state afterward. All 1,136 local
+tests and the four exact coverage metrics passed at 100% after the change.

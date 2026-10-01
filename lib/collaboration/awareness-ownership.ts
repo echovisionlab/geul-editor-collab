@@ -56,9 +56,9 @@ export class AwarenessConnectionOwnership<Context = unknown> {
     }
 
     const owners = this.ownersFor(connection.document);
-    for (const { clientId } of entries) {
+    for (const { clientId, state } of entries) {
       const owner = owners.get(clientId);
-      if (owner && owner !== connection) {
+      if (state !== null && owner && owner !== connection) {
         throw new Error("Awareness client ID belongs to another connection");
       }
     }
@@ -76,7 +76,9 @@ export class AwarenessConnectionOwnership<Context = unknown> {
       removed.push(clientId);
     }
 
-    // Hocuspocus 4.3 decodes awareness into a new scratch Awareness and then
+    // A provider also sends null states when its local timer expires a peer.
+    // Ignore those removals: only the owning connection may remove presence.
+    // Hocuspocus 4.6 decodes awareness into a new scratch Awareness and then
     // re-encodes only scratch.getStates(). A null removal is therefore lost.
     // Apply only already-authorized removals here; non-null states continue to
     // the normal hook where their Member projection is rewritten first.

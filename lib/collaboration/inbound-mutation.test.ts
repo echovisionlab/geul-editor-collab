@@ -5,11 +5,22 @@ import {
   MessageReceiver,
   OutgoingMessage,
 } from "@hocuspocus/server";
+import { create, fromJson } from "@bufbuild/protobuf";
+import { getBlockRoomCollaborativeText } from "@echovisionlab/geul-common/collaboration/block-room-codec";
+import { contentBlockCatalogFingerprint } from "@echovisionlab/geul-proto/content/block_catalog.ts";
+import {
+  LocalizedRichTextDocumentSchema,
+  RichTextProfile,
+} from "@echovisionlab/geul-proto/content/block_content_pb.ts";
+import { CollaborationPrincipalSchema } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
+import { AIDocumentFieldTargetSchema } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { EditSessionContributorTracker } from "./edit-session-contributors.ts";
 import { createConnectionHooks } from "./connection-hooks.ts";
 import { isAttributedInboundMutation } from "./inbound-mutation.ts";
+import { createDocumentHooks } from "./document-hooks.ts";
+import { ResidentBlockRuntime } from "./resident-block-runtime.ts";
 
 const name = "post:11111111-1111-4111-8111-111111111111:en";
 const cleanups: (() => void)[] = [];
@@ -101,6 +112,187 @@ async function receive(connection: Connection, payload: Uint8Array) {
   await new MessageReceiver(message).apply(connection.document, connection);
 }
 
+function postDocument() {
+  return fromJson(LocalizedRichTextDocumentSchema, {
+    blockCatalogFingerprint: contentBlockCatalogFingerprint,
+    profile: RichTextProfile.POST,
+    locale: "en",
+    base: {
+      nodes: [
+        {
+          block: {
+            id: "22222222-2222-4222-8222-222222222222",
+            paragraph: { props: {} },
+          },
+          placement: { index: 0 },
+        },
+      ],
+    },
+    localeOverlay: {
+      locale: "en",
+      blocks: [
+        {
+          blockId: "22222222-2222-4222-8222-222222222222",
+          paragraph: { content: [{ text: { text: "seed" } }] },
+        },
+      ],
+    },
+  });
+}
+
+function postText(document: Y.Doc) {
+  return getBlockRoomCollaborativeText(document, {
+    id: "22222222-2222-4222-8222-222222222222",
+    family: "rich_text",
+    locale: true,
+    path: "content[0].text.text",
+  });
+}
+
+function deleteSet(document: Y.Doc) {
+  return Y.decodeUpdate(Y.encodeStateAsUpdate(document)).ds.clients;
+}
+
+function expectStateVectorCoverage(
+  acknowledgement: { stateVector: string },
+  expectedStateVector: Uint8Array,
+) {
+  const actual = Y.decodeStateVector(
+    Buffer.from(acknowledgement.stateVector, "base64"),
+  );
+  for (const [client, clock] of Y.decodeStateVector(expectedStateVector)) {
+    expect(actual.get(client) ?? 0).toBeGreaterThanOrEqual(clock);
+  }
+}
+
+function expectDeleteSetCoverage(
+  acknowledgement: {
+    deleted: Record<string, Array<{ clock: number; len: number }>>;
+  },
+  expected: Map<number, Array<{ clock: number; len: number }>>,
+) {
+  for (const [client, ranges] of expected) {
+    const actualRanges = acknowledgement.deleted[String(client)] ?? [];
+    for (const expectedRange of ranges) {
+      expect(
+        actualRanges.some(
+          (actualRange) =>
+            actualRange.clock <= expectedRange.clock &&
+            actualRange.clock + actualRange.len >=
+              expectedRange.clock + expectedRange.len,
+        ),
+      ).toBe(true);
+    }
+  }
+}
+
+async function residentPostFixture() {
+  const document = new Document(name);
+  const broadcast = vi.fn();
+  Object.assign(document, { broadcastStateless: broadcast });
+  let revision = 1;
+  const gateway = {
+    load: vi.fn().mockResolvedValue({
+      document: postDocument(),
+      documentRevision: "revision-1",
+      locale: "en",
+      sourceLocale: "en",
+      localeExists: true,
+      presentLocaleValues: [
+        create(AIDocumentFieldTargetSchema, {
+          owner: {
+            case: "blockHandle",
+            value: "22222222-2222-4222-8222-222222222222",
+          },
+          fieldHandle: "content",
+        }),
+      ],
+      sourceMetadata: { locale: "en", title: "Post" },
+      localeMetadata: { locale: "en", title: "Post" },
+    }),
+    save: vi.fn(async () => ({
+      documentRevision: `revision-${++revision}`,
+      changed: true,
+      sourceChanged: true,
+      locale: "en",
+    })),
+  };
+  const runtime = new ResidentBlockRuntime({ post: gateway as never });
+  await runtime.load(
+    name,
+    document,
+    create(CollaborationPrincipalSchema, {
+      sessionId: "33333333-3333-4333-8333-333333333333",
+    }),
+  );
+  const persistEditSession = vi.spyOn(runtime, "persistEditSession");
+  const documents = new Map([[name, document]]);
+  const tracker = new EditSessionContributorTracker<Document>({
+    listDocuments: () => documents,
+    loadDocument: async () => document,
+    persistDocument: (documentName, savedDocument, options) =>
+      runtime.persistEditSession(documentName, savedDocument, options),
+    withPersistenceQueue: (queueKey, operation) =>
+      runtime.withPersistenceQueue(queueKey, async (persist) => {
+        await operation(persist);
+      }),
+    unloadDocument: async () => undefined,
+    supportsVersionCheckpoints: () => false,
+    logFailure: vi.fn(),
+    logTerminalCheckpointFailure: vi.fn(),
+  });
+  const hooks = createConnectionHooks({
+    editSessions: () => tracker,
+    blockRooms: { connected: vi.fn(), beforeSync: vi.fn() },
+    metadataAiGrace: {} as never,
+    shutdownConnections: {} as never,
+    isDocumentFenced: () => false,
+    settlePendingRoomInvalidation: async () => undefined,
+  });
+  const store = createDocumentHooks({
+    editSessions: () => tracker,
+    revisionConflicts: { isStale: () => false, handle: () => false },
+  } as never).onStoreDocument!;
+  function connection(memberId: string) {
+    const socket = { readyState: 1, send: vi.fn(), close: vi.fn() };
+    const context = {
+      member: { id: memberId },
+      canEdit: true,
+      blockRoomAdmissionState: "accepted" as const,
+    };
+    const client = new Connection(
+      socket,
+      new Request("http://collab.test"),
+      document,
+      memberId,
+      context,
+    );
+    client.beforeSync((currentConnection, payload) =>
+      hooks.beforeSync!({
+        connection: currentConnection,
+        context,
+        documentName: name,
+        document,
+        ...payload,
+      } as never),
+    );
+    return client;
+  }
+  cleanups.push(() => {
+    tracker.release();
+    runtime.unload(name);
+    document.destroy();
+  });
+  return {
+    broadcast,
+    connection,
+    document,
+    gateway,
+    persistEditSession,
+    store,
+  };
+}
+
 describe("inbound document actor lane at the Hocuspocus MessageReceiver boundary", () => {
   it("persists the first actor before applying a simultaneously arriving second socket update", async () => {
     const { document, tracker, persist, connection, changes } = fixture();
@@ -128,6 +320,96 @@ describe("inbound document actor lane at the Hocuspocus MessageReceiver boundary
       body: { A: "first", B: "second" },
     });
   });
+
+  it.each([
+    {
+      label: "the same actor",
+      actorB: "member-A",
+      actorA: "member-A",
+      expectedContributors: ["member-A"],
+      expectedAcknowledgements: 1,
+    },
+    {
+      label: "different actors",
+      actorB: "member-B",
+      actorA: "member-A",
+      expectedContributors: ["member-B", "member-A"],
+      expectedAcknowledgements: 2,
+    },
+  ])(
+    "acknowledges the B insert and A peer delete for $label",
+    async ({
+      actorA,
+      actorB,
+      expectedAcknowledgements,
+      expectedContributors,
+    }) => {
+      const {
+        broadcast,
+        connection,
+        document,
+        gateway,
+        persistEditSession,
+        store,
+      } = await residentPostFixture();
+      const clientB = new Y.Doc();
+      const clientA = new Y.Doc();
+      const initialUpdate = Y.encodeStateAsUpdate(document);
+      Y.applyUpdate(clientB, initialUpdate);
+      Y.applyUpdate(clientA, initialUpdate);
+
+      const beforeB = Y.encodeStateVector(document);
+      const bText = postText(clientB);
+      bText.insert(bText.length, " B");
+      const bStateVector = Y.encodeStateVector(clientB);
+      const bUpdate = Y.encodeStateAsUpdate(clientB, beforeB);
+      await receive(connection(actorB), bUpdate);
+
+      const beforeA = Y.encodeStateVector(document);
+      Y.applyUpdate(clientA, bUpdate);
+      postText(clientA).delete("seed".length, " B".length);
+      const aDelete = Y.encodeStateAsUpdate(clientA, beforeA);
+      await receive(connection(actorA), aDelete);
+
+      if (actorA !== actorB) {
+        const insertAcknowledgement = JSON.parse(
+          String(broadcast.mock.calls[0]?.[0]),
+        ) as {
+          stateVector: string;
+          deleted: Record<string, Array<{ clock: number; len: number }>>;
+        };
+        expectStateVectorCoverage(insertAcknowledgement, bStateVector);
+        expect(insertAcknowledgement.deleted).toEqual({});
+      }
+
+      await store({ documentName: name, document } as never);
+
+      const acknowledgements = broadcast.mock.calls.map(
+        ([payload]) =>
+          JSON.parse(String(payload)) as {
+            stateVector: string;
+            deleted: Record<string, Array<{ clock: number; len: number }>>;
+          },
+      );
+      expect(acknowledgements).toHaveLength(expectedAcknowledgements);
+      expect(
+        persistEditSession.mock.calls.map(
+          ([, , options]) => options.contributorMemberIds,
+        ),
+      ).toEqual(expectedContributors.map((memberId) => [memberId]));
+      expect(Y.decodeStateVector(bStateVector).size).toBeGreaterThan(0);
+
+      const expectedDeleted = deleteSet(document);
+      expect(expectedDeleted.size).toBeGreaterThan(0);
+      const deleteAcknowledgement = acknowledgements.at(-1)!;
+      expectStateVectorCoverage(deleteAcknowledgement, bStateVector);
+      expectDeleteSetCoverage(deleteAcknowledgement, expectedDeleted);
+      expect(gateway.save).toHaveBeenCalledTimes(actorA === actorB ? 0 : 2);
+
+      clientA.destroy();
+      clientB.destroy();
+    },
+  );
 
   it("keeps the second actor out while the first actor's durable write is pending", async () => {
     const { document, persist, connection } = fixture();

@@ -6,7 +6,11 @@ import {
   OutgoingMessage,
   type WebSocketLike,
 } from "@hocuspocus/server";
-import { Awareness } from "y-protocols/awareness";
+import {
+  Awareness,
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+} from "y-protocols/awareness";
 import {
   createEncoder,
   toUint8Array,
@@ -96,7 +100,7 @@ async function applyFrame(
 }
 
 describe("awareness connection ownership", () => {
-  it("binds client IDs at the real MessageReceiver boundary and rejects cross-connection updates and removals", async () => {
+  it("binds client IDs, rejects foreign updates, and ignores foreign removals at the MessageReceiver boundary", async () => {
     const document = new Document("post:entity-1");
     const ownership = new AwarenessConnectionOwnership<Context>();
     const first = connectionFixture(document, "socket-1", "member-1");
@@ -136,9 +140,7 @@ describe("awareness connection ownership", () => {
       { cursor: 1 },
       null,
     ]);
-    expect(() =>
-      ownership.prepareInboundMessage(second, foreignRemoval),
-    ).toThrow("Awareness client ID belongs to another connection");
+    await applyFrame(ownership, second, foreignRemoval);
     expect(document.awareness.getStates().get(101)).toEqual({
       user: { id: "member-1" },
       cursor: 1,
@@ -147,6 +149,70 @@ describe("awareness connection ownership", () => {
     first.close();
     second.close();
     document.destroy();
+  });
+
+  it("accepts a peer timeout frame without removing the server's owned presence", async () => {
+    vi.useFakeTimers();
+    const document = new Document("post:entity-1");
+    const ownership = new AwarenessConnectionOwnership<Context>();
+    const first = connectionFixture(document, "socket-1", "member-1");
+    const second = connectionFixture(document, "socket-2", "member-2");
+    const peerDocument = new Y.Doc();
+    peerDocument.clientID = 202;
+    const peerAwareness = new Awareness(peerDocument);
+    const timeoutFrames: Uint8Array[] = [];
+    document.beforeHandleAwareness((_document, states, origin) => {
+      ownership.rewriteOwnedStates(states, origin, (state) => state);
+      return Promise.resolve();
+    });
+    peerAwareness.on(
+      "update",
+      ({ removed }: { removed: number[] }, origin: unknown) => {
+        if (origin === "timeout") {
+          timeoutFrames.push(
+            new OutgoingMessage(document.name)
+              .createAwarenessUpdateMessage(peerAwareness, removed)
+              .toUint8Array(),
+          );
+        }
+      },
+    );
+
+    try {
+      await applyFrame(
+        ownership,
+        first,
+        awarenessFrame(document.name, 101, [{ cursor: 1 }]),
+      );
+      applyAwarenessUpdate(
+        peerAwareness,
+        encodeAwarenessUpdate(document.awareness, [101]),
+        "remote",
+      );
+      // A background tab can miss a heartbeat that the server still receives.
+      await applyFrame(
+        ownership,
+        first,
+        awarenessFrame(document.name, 101, [{ cursor: 1 }, { cursor: 2 }]),
+      );
+      const peerClock = peerAwareness.meta.get(101);
+      if (!peerClock) throw new Error("Peer awareness clock was not received");
+      peerClock.lastUpdated = Date.now() - 31_000;
+      vi.advanceTimersByTime(3_000);
+
+      expect(timeoutFrames).toHaveLength(1);
+      await applyFrame(ownership, second, timeoutFrames[0]!);
+      expect(document.awareness.getStates().get(101)).toEqual({ cursor: 2 });
+      expect(document.getClients(first).has(101)).toBe(true);
+      expect(document.getClients(second).has(101)).toBe(false);
+    } finally {
+      first.close();
+      second.close();
+      peerAwareness.destroy();
+      peerDocument.destroy();
+      document.destroy();
+      vi.useRealTimers();
+    }
   });
 
   it("applies an owned null removal before Hocuspocus scratch re-encoding can lose it", async () => {
