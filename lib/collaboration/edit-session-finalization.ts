@@ -53,7 +53,7 @@ interface FinalizeOptions {
 export class EditSessionFinalizationCoordinator<
   TDocument extends EditSessionDocumentLike,
 > {
-  private readonly finalizationPromises = new Map<string, Promise<void>>();
+  private readonly finalizationPromises = new Set<Promise<void>>();
 
   constructor(
     private readonly dependencies: EditSessionFinalizationDependencies<TDocument>,
@@ -81,7 +81,9 @@ export class EditSessionFinalizationCoordinator<
   }
 
   async drain(): Promise<void> {
-    await Promise.allSettled(this.finalizationPromises.values());
+    while (this.finalizationPromises.size > 0) {
+      await Promise.allSettled(this.finalizationPromises);
+    }
     for (let pass = 0; pass <= EDIT_SESSION_MAX_RETRIES; pass += 1) {
       const entries = [...this.dependencies.sessions.entries()];
       if (entries.length === 0) {
@@ -113,10 +115,10 @@ export class EditSessionFinalizationCoordinator<
   ): Promise<void> {
     const promise = this.finalize(entityDocumentName, session, options).finally(
       () => {
-        this.finalizationPromises.delete(entityDocumentName);
+        this.finalizationPromises.delete(promise);
       },
     );
-    this.finalizationPromises.set(entityDocumentName, promise);
+    this.finalizationPromises.add(promise);
     return promise;
   }
 
@@ -125,6 +127,9 @@ export class EditSessionFinalizationCoordinator<
     session: EditSessionState,
     options: FinalizeOptions,
   ): Promise<void> {
+    if (this.dependencies.sessions.get(entityDocumentName) !== session) {
+      return;
+    }
     if (
       !options.ignoreConnections &&
       this.dependencies.documents.hasConnectedEditor(entityDocumentName)
@@ -143,11 +148,14 @@ export class EditSessionFinalizationCoordinator<
     const contributorMemberIds = sorted(session.contributors);
     const source =
       this.dependencies.documents.checkpointDocuments(entityDocumentName)[0];
+    let completedSource: typeof source | undefined;
     try {
-      const completed = await persistEditSessionCheckpoint({
+      completedSource = await persistEditSessionCheckpoint({
         entityDocumentName,
         sourceDocument: source,
         contributorMemberIds,
+        isCurrent: () =>
+          this.dependencies.sessions.get(entityDocumentName) === session,
         canContinue: () =>
           this.canContinue(
             entityDocumentName,
@@ -155,10 +163,11 @@ export class EditSessionFinalizationCoordinator<
             generation,
             options.ignoreConnections === true,
           ),
-        sourceDocumentIsCurrent: (documentName) =>
+        sourceDocumentIsCurrent: (documentName, document) =>
           this.dependencies.documents.sourceDocumentIsCurrent(
             entityDocumentName,
             documentName,
+            document,
           ),
         persistWith: (persistDocument, documentName, document, saveOptions) =>
           this.dependencies.persistWith(
@@ -171,16 +180,20 @@ export class EditSessionFinalizationCoordinator<
           this.dependencies.options.withPersistenceQueue(queueKey, operation),
       });
 
-      if (!completed) {
+      if (!completedSource) {
         return;
       }
-      if (this.complete(entityDocumentName, session)) {
+      if (
+        this.complete(entityDocumentName, session, completedSource) !==
+        "settled"
+      ) {
         return;
       }
     } catch (error) {
       await this.handleFailure(
         entityDocumentName,
         session,
+        source,
         error,
         options.throwOnFailure === true,
       );
@@ -193,33 +206,43 @@ export class EditSessionFinalizationCoordinator<
     ) {
       return;
     }
-    await this.unloadDisconnectedDocuments(entityDocumentName);
+    await this.unloadDisconnectedDocuments(entityDocumentName, [
+      completedSource,
+    ]);
   }
 
   private complete(
     entityDocumentName: string,
     session: EditSessionState,
-  ): boolean {
+    source: { documentName: string; document: TDocument } | undefined,
+  ): "continued" | "settled" | "stale" {
+    if (!this.isCurrentFinalization(entityDocumentName, session, source)) {
+      return "stale";
+    }
     const nextContributors = sorted(session.nextContributors);
     if (nextContributors.length === 0) {
       this.dependencies.sessions.delete(entityDocumentName);
       this.dependencies.notifyEntitySettled(entityDocumentName);
-      return false;
+      return "settled";
     }
     session.contributors = new Set(nextContributors);
     session.nextContributors.clear();
     session.checkpointDueAt = Date.now() + EDIT_SESSION_VERSION_CHECKPOINT_MS;
     session.finalizing = false;
     this.scheduleNextCheckpoint(entityDocumentName, session);
-    return true;
+    return "continued";
   }
 
   private async handleFailure(
     entityDocumentName: string,
     session: EditSessionState,
+    source: { documentName: string; document: TDocument } | undefined,
     error: unknown,
     throwOnFailure: boolean,
   ): Promise<void> {
+    if (!this.isCurrentFinalization(entityDocumentName, session, source)) {
+      return;
+    }
     if (error instanceof EditSessionEntityDeletedError) {
       return;
     }
@@ -242,6 +265,7 @@ export class EditSessionFinalizationCoordinator<
       await this.settleConflict(
         entityDocumentName,
         session,
+        source,
         error,
         reason,
         failure,
@@ -249,22 +273,15 @@ export class EditSessionFinalizationCoordinator<
       return;
     }
     if (session.retryAttempts > EDIT_SESSION_MAX_RETRIES) {
-      const logTerminalFailure =
-        scope && entityType
-          ? () =>
-              this.dependencies.options.logTerminalCheckpointFailure({
-                reason,
-                entity_type: entityType,
-                entity_id: scope.entityId,
-                retry_count: session.retryAttempts,
-              })
-          : () =>
-              this.dependencies.options.logFailure({
-                ...failure,
-                terminal: true,
-              });
-      logTerminalFailure();
-      await this.settleExhaustedFinalization(entityDocumentName, session);
+      await this.handleExhaustedFailure(
+        entityDocumentName,
+        session,
+        source,
+        scope,
+        entityType,
+        reason,
+        failure,
+      );
       return;
     }
     this.dependencies.options.logFailure(failure);
@@ -274,9 +291,32 @@ export class EditSessionFinalizationCoordinator<
     this.scheduleRetry(entityDocumentName, session);
   }
 
+  private async handleExhaustedFailure(
+    entityDocumentName: string,
+    session: EditSessionState,
+    source: { documentName: string; document: TDocument } | undefined,
+    scope: ReturnType<EditSessionDocumentRegistry<TDocument>["scope"]>,
+    entityType: ReturnType<typeof checkpointEntityType>,
+    reason: ReturnType<typeof finalizationFailureReason>,
+    failure: Record<string, unknown>,
+  ): Promise<void> {
+    if (scope && entityType) {
+      this.dependencies.options.logTerminalCheckpointFailure({
+        reason,
+        entity_type: entityType,
+        entity_id: scope.entityId,
+        retry_count: session.retryAttempts,
+      });
+    } else {
+      this.dependencies.options.logFailure({ ...failure, terminal: true });
+    }
+    await this.settleExhaustedFinalization(entityDocumentName, session, source);
+  }
+
   private async settleConflict(
     entityDocumentName: string,
     session: EditSessionState,
+    source: { documentName: string; document: TDocument } | undefined,
     error: CollaborationConflictError,
     reason: ReturnType<typeof finalizationFailureReason>,
     failure: Record<string, unknown>,
@@ -301,16 +341,20 @@ export class EditSessionFinalizationCoordinator<
       entityDocumentName,
       error,
     );
-    await this.settleExhaustedFinalization(entityDocumentName, session);
+    await this.settleExhaustedFinalization(entityDocumentName, session, source);
   }
 
   async settleExhaustedFinalization(
     entityDocumentName: string,
     session: EditSessionState,
+    source?: { documentName: string; document: TDocument },
   ): Promise<void> {
-    if (this.dependencies.sessions.get(entityDocumentName) !== session) {
+    if (!this.isCurrentFinalization(entityDocumentName, session, source)) {
       return;
     }
+    const documents = source
+      ? [source]
+      : this.dependencies.documents.checkpointDocuments(entityDocumentName);
     this.dependencies.cancelTimer(session);
     this.dependencies.sessions.delete(entityDocumentName);
 
@@ -327,15 +371,26 @@ export class EditSessionFinalizationCoordinator<
     if (this.dependencies.isShuttingDown()) {
       return;
     }
-    await this.unloadDisconnectedDocuments(entityDocumentName);
+    await this.unloadDisconnectedDocuments(entityDocumentName, documents);
   }
 
   private async unloadDisconnectedDocuments(
     entityDocumentName: string,
+    documents: Array<{ documentName: string; document: TDocument }>,
   ): Promise<void> {
-    for (const { document } of this.dependencies.documents.checkpointDocuments(
-      entityDocumentName,
-    )) {
+    for (const { documentName, document } of documents) {
+      if (this.dependencies.sessions.has(entityDocumentName)) {
+        return;
+      }
+      if (
+        !this.dependencies.documents.sourceDocumentIsCurrent(
+          entityDocumentName,
+          documentName,
+          document,
+        )
+      ) {
+        continue;
+      }
       if ([...document.getConnections()].length > 0) {
         continue;
       }
@@ -358,6 +413,9 @@ export class EditSessionFinalizationCoordinator<
     generation: number,
     ignoreConnections: boolean,
   ): boolean {
+    if (this.dependencies.sessions.get(entityDocumentName) !== session) {
+      return false;
+    }
     if (
       session.generation === generation &&
       session.nextContributors.size === 0 &&
@@ -374,6 +432,22 @@ export class EditSessionFinalizationCoordinator<
     session.finalizing = false;
     this.scheduleRetry(entityDocumentName, session);
     return false;
+  }
+
+  private isCurrentFinalization(
+    entityDocumentName: string,
+    session: EditSessionState,
+    source: { documentName: string; document: TDocument } | undefined,
+  ): boolean {
+    return (
+      this.dependencies.sessions.get(entityDocumentName) === session &&
+      (!source ||
+        this.dependencies.documents.sourceDocumentIsCurrent(
+          entityDocumentName,
+          source.documentName,
+          source.document,
+        ))
+    );
   }
 
   private scheduleNextCheckpoint(

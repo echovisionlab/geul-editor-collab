@@ -182,7 +182,7 @@ describe("EditSessionFinalizationCoordinator invalid internal scope fallback", (
       });
       finalization.schedule(name, currentSession, 0, "active-window");
       await vi.advanceTimersByTimeAsync(0);
-      expect(sourceCurrentChecks).toBe(1);
+      expect(sourceCurrentChecks).toBe(2);
       expect([...currentSession.contributors]).toEqual(["next-member"]);
       expect(currentSession.timerMode).toBe(
         connected ? "active-window" : "room-close",
@@ -289,6 +289,137 @@ describe("EditSessionFinalizationCoordinator invalid internal scope fallback", (
     finalization.schedule(name, currentSession, 0, "room-close");
     await vi.advanceTimersByTimeAsync(0);
     expect(trackerOptions.unloadDocument).not.toHaveBeenCalled();
+  });
+
+  it("does not complete a session when its source is replaced before completion resumes", async () => {
+    const name = "post:11111111-1111-4111-8111-111111111111:en";
+    const source: EditSessionDocumentLike = { getConnections: () => [] };
+    const replacement: EditSessionDocumentLike = {
+      getConnections: () => [],
+    };
+    const documents = new Map([[name, source]]);
+    const trackerOptions = {
+      ...options(vi.fn()),
+      listDocuments: () => documents,
+      unloadDocument: vi.fn(async () => undefined),
+    };
+    class ReplacingRegistry extends EditSessionDocumentRegistry<EditSessionDocumentLike> {
+      override sourceDocumentIsCurrent(
+        entityDocumentName: string,
+        documentName: string,
+        value: EditSessionDocumentLike,
+      ): boolean {
+        const isCurrent = super.sourceDocumentIsCurrent(
+          entityDocumentName,
+          documentName,
+          value,
+        );
+        if (value === source) {
+          queueMicrotask(() => documents.set(name, replacement));
+        }
+        return isCurrent;
+      }
+    }
+    const registry = new ReplacingRegistry(trackerOptions);
+    const currentSession = session(0);
+    const sessions = new Map([[name, currentSession]]);
+    const finalization = new EditSessionFinalizationCoordinator({
+      options: trackerOptions,
+      documents: registry,
+      sessions,
+      pendingContributors: new Map(),
+      cancelTimer: vi.fn(),
+      notifyEntitySettled: vi.fn(),
+      persistWith: async () => undefined,
+      isShuttingDown: () => false,
+    });
+
+    finalization.schedule(name, currentSession, 0, "room-close");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(documents.get(name)).toBe(replacement);
+    expect(sessions.get(name)).toBe(currentSession);
+    expect(trackerOptions.unloadDocument).not.toHaveBeenCalledWith(replacement);
+  });
+
+  it("ignores a scheduled finalization after its session has been replaced", async () => {
+    const name = "post:11111111-1111-4111-8111-111111111111:en";
+    const source: EditSessionDocumentLike = { getConnections: () => [] };
+    const trackerOptions = {
+      ...options(vi.fn()),
+      listDocuments: () =>
+        [[name, source]] as Array<[string, EditSessionDocumentLike]>,
+    };
+    const originalSession = session(0);
+    const replacementSession = session(0);
+    const sessions = new Map([[name, originalSession]]);
+    const persistWith = vi.fn(async () => undefined);
+    const finalization = new EditSessionFinalizationCoordinator({
+      options: trackerOptions,
+      documents: new EditSessionDocumentRegistry(trackerOptions),
+      sessions,
+      pendingContributors: new Map(),
+      cancelTimer: vi.fn(),
+      notifyEntitySettled: vi.fn(),
+      persistWith,
+      isShuttingDown: () => false,
+    });
+
+    finalization.schedule(name, originalSession, 0, "room-close");
+    sessions.set(name, replacementSession);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(persistWith).not.toHaveBeenCalled();
+    expect(sessions.get(name)).toBe(replacementSession);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not retry after the session is replaced during its ordinary save", async () => {
+    const name = "post:11111111-1111-4111-8111-111111111111:en";
+    const source: EditSessionDocumentLike = { getConnections: () => [] };
+    const trackerOptions = {
+      ...options(vi.fn()),
+      listDocuments: () =>
+        [[name, source]] as Array<[string, EditSessionDocumentLike]>,
+    };
+    const originalSession = session(0);
+    const replacementSession = session(0);
+    const sessions = new Map([[name, originalSession]]);
+    let persistStarted!: () => void;
+    let finishPersist!: () => void;
+    const persistStartedPromise = new Promise<void>((resolve) => {
+      persistStarted = resolve;
+    });
+    const persistGate = new Promise<void>((resolve) => {
+      finishPersist = resolve;
+    });
+    const persistWith = vi.fn(async () => {
+      persistStarted();
+      await persistGate;
+    });
+    const finalization = new EditSessionFinalizationCoordinator({
+      options: trackerOptions,
+      documents: new EditSessionDocumentRegistry(trackerOptions),
+      sessions,
+      pendingContributors: new Map(),
+      cancelTimer: vi.fn(),
+      notifyEntitySettled: vi.fn(),
+      persistWith,
+      isShuttingDown: () => false,
+    });
+
+    finalization.schedule(name, originalSession, 0, "room-close");
+    await vi.advanceTimersByTimeAsync(0);
+    await persistStartedPromise;
+    sessions.set(name, replacementSession);
+    finishPersist();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(persistWith).toHaveBeenCalledTimes(1);
+    expect(sessions.get(name)).toBe(replacementSession);
+    expect(replacementSession.retryAttempts).toBe(0);
+    expect(replacementSession.finalizing).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("uses the active-window retry mode while an editor remains connected", async () => {
