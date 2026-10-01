@@ -1,3 +1,4 @@
+import type { JsonValue } from "@bufbuild/protobuf";
 import type { CollaborationPrincipal } from "@echovisionlab/geul-proto/intra/collaboration_pb.ts";
 import type { AIDocumentFieldTarget } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
 import * as artist from "@echovisionlab/geul-proto/intra/artist_pb.ts";
@@ -18,6 +19,7 @@ import { callResidentRpc } from "./resident-block-rpc.ts";
 interface ResidentLoadResponse {
   document?: ResidentRichTextDocumentLoad["document"];
   documentRevision: string;
+  metadata?: Record<string, unknown>;
   locale: string;
   localeExists: boolean;
   targetRevision?: string;
@@ -245,6 +247,15 @@ export async function loadResidentBlockDocument(
       ? {}
       : { targetRevision: response.targetRevision }),
     sourceMetadata,
+    ...("metadata" in response && response.metadata
+      ? {
+          documentMetadata: Object.fromEntries(
+            Object.entries(response.metadata)
+              .filter(([key]) => !key.startsWith("$"))
+              .map(([key, value]) => [key, value === undefined ? null : value]),
+          ) as Record<string, JsonValue>,
+        }
+      : {}),
     ...(response.localeMetadata === undefined
       ? {}
       : { localeMetadata: projectSourceMetadata(response.localeMetadata) }),

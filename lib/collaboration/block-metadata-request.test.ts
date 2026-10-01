@@ -11,13 +11,17 @@ describe("resident Block metadata request parsing", () => {
       parsePostDocumentMetadataRequest({
         categoryIds: ["category-1"],
         tagIds: ["tag-1"],
+        observed: { categoryIds: [], tagIds: [] },
       }),
     ).toMatchObject({
       update: { type: "post", scope: "document" },
     });
-    expect(parsePostDocumentMetadataRequest({ tagIds: [] })).toMatchObject({
-      update: { categoryIds: undefined, tagIds: [] },
-    });
+    expect(
+      parsePostDocumentMetadataRequest({
+        tagIds: [],
+        observed: { tagIds: [] },
+      }),
+    ).toMatchObject({ update: { categoryIds: undefined, tagIds: [] } });
   });
 
   it.each([
@@ -35,6 +39,21 @@ describe("resident Block metadata request parsing", () => {
     );
   });
 
+  it.each([
+    { categoryIds: [] },
+    { tagIds: [] },
+    { categoryIds: [], observed: { tagIds: [] } },
+    { tagIds: [], observed: { categoryIds: [] } },
+    { tagIds: [], observed: { tagIds: undefined } },
+  ])(
+    "rejects Post collection writes without the matching baseline %#",
+    (value) => {
+      expect(() => parsePostDocumentMetadataRequest(value as never)).toThrow(
+        "request_body_invalid",
+      );
+    },
+  );
+
   it("parses complete Artist and Label document metadata", () => {
     expect(
       parseResidentDocumentMetadataRequest("artist", {
@@ -45,6 +64,7 @@ describe("resident Block metadata request parsing", () => {
         slug: "artist",
         labelIds: ["label-1"],
         parentArtistId: null,
+        observed: { socialLinks: {}, labelIds: [] },
       }).update,
     ).toMatchObject({ type: "artist", scope: "document", countryCode: null });
     expect(
@@ -63,6 +83,7 @@ describe("resident Block metadata request parsing", () => {
     { socialLinks: null },
     { socialLinks: [] },
     { socialLinks: { bad: 1 } },
+    { socialLinks: {}, observed: { socialLinks: { bad: 1 } } },
     { website: 1 },
   ])("rejects invalid resident document request %#", (value) => {
     expect(() =>
@@ -84,6 +105,21 @@ describe("resident Block metadata request parsing", () => {
   });
 
   it.each([
+    ["artist", { socialLinks: {} }],
+    ["artist", { labelIds: [] }],
+    ["artist", { labelIds: [], observed: { socialLinks: {} } }],
+    ["label", { socialLinks: {} }],
+    ["label", { socialLinks: {}, observed: {} }],
+  ] as const)(
+    "rejects %s collection writes without the matching baseline %#",
+    (type, value) => {
+      expect(() =>
+        parseResidentDocumentMetadataRequest(type, value as never),
+      ).toThrow("request_body_invalid");
+    },
+  );
+
+  it.each([
     ["post", { title: null, summary: "Summary" }],
     ["page", { title: "Page", summary: null }],
     ["work", { sourceTitle: "Work", summary: "Summary" }],
@@ -99,6 +135,7 @@ describe("resident Block metadata request parsing", () => {
       {
         title: "Release",
         creditNotes: [{ creditId: "credit-1", note: "note" }],
+        observed: { creditNotes: [] },
       },
     ],
   ] as const)("parses %s source metadata", (type, fields) => {
@@ -152,6 +189,46 @@ describe("resident Block metadata request parsing", () => {
       parseSourceMetadataRequest("release", {
         creditNotes: creditNotes as never,
       }),
+    ).toThrow("request_body_invalid");
+  });
+
+  it("parses only paired Release credit-note observations", () => {
+    expect(
+      parseSourceMetadataRequest("release", {
+        creditNotes: [{ creditId: "credit-1", note: "mine" }],
+        observed: {
+          creditNotes: [{ creditId: "credit-1", note: "old" }],
+        },
+      }).update,
+    ).toMatchObject({
+      type: "release",
+      observed: { creditNotes: [{ creditId: "credit-1", note: "old" }] },
+    });
+    expect(() =>
+      parseSourceMetadataRequest("release", {
+        title: "Release",
+        creditNotes: [],
+      }),
+    ).toThrow("request_body_invalid");
+    expect(
+      parseSourceMetadataRequest("release", { title: "Release" }).update,
+    ).toMatchObject({ type: "release", title: "Release" });
+    expect(() =>
+      parseSourceMetadataRequest("release", {
+        creditNotes: [],
+        observed: {},
+      }),
+    ).toThrow("request_body_invalid");
+    expect(() =>
+      parseSourceMetadataRequest("release", {
+        observed: { creditNotes: [] },
+      }),
+    ).toThrow("request_body_invalid");
+    expect(() =>
+      parseSourceMetadataRequest("release", {
+        creditNotes: [],
+        observed: { creditNotes: [{ creditId: "credit-1", note: 1 }] },
+      } as never),
     ).toThrow("request_body_invalid");
   });
 });

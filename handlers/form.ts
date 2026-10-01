@@ -14,13 +14,14 @@ import * as Y from "yjs";
 import { loadFormDocument, saveFormDocument } from "../lib/api/form.ts";
 import { handlerDocumentIdentity } from "../lib/collaboration/handler-document-identity.ts";
 import { requireSaveContributorMemberIds } from "../lib/collaboration/mutation-contributors.ts";
+import {
+  projectDocumentRoomSnapshot,
+  type DocumentRoomSnapshot,
+} from "../lib/collaboration/document-room-snapshot.ts";
 import { logger } from "../lib/logger.ts";
 import { TransientDocumentStateMap } from "../lib/transient-document-state.ts";
 
-type FormRevisionTuple = {
-  documentRevision: string;
-  targetRevision?: string;
-};
+type FormRevisionTuple = DocumentRoomSnapshot;
 
 type FormCanonicalSnapshot = FormCanonicalRoomOutput;
 
@@ -64,8 +65,10 @@ function requireFormRevision(documentId: string): FormRevisionTuple {
 }
 
 function requireFormRevisionTuple(
+  documentName: string,
   locale: string,
   sourceLocale: string,
+  localeExists: boolean,
   documentRevision: string,
   targetRevision: string | undefined,
 ): FormRevisionTuple {
@@ -75,13 +78,17 @@ function requireFormRevisionTuple(
   if (locale === sourceLocale && targetRevision !== undefined) {
     throw new Error("Form source collaboration returned target revision");
   }
-  if (locale !== sourceLocale && !targetRevision) {
+  if (locale !== sourceLocale && localeExists && !targetRevision) {
     throw new Error(
       "Form target collaboration response target revision missing",
     );
   }
   return {
+    documentName,
     documentRevision,
+    sourceLocale,
+    locale,
+    localeExists,
     ...(targetRevision === undefined ? {} : { targetRevision }),
   };
 }
@@ -144,15 +151,16 @@ async function storeFormCanonicalDocument(
     if (response.locale !== locale) {
       throw new Error("Form collaboration response locale mismatch");
     }
-    expectedFormRevisionByDocumentId.set(
+    const nextRevision = requireFormRevisionTuple(
       documentId,
-      requireFormRevisionTuple(
-        locale,
-        sourceLocale,
-        response.documentRevision,
-        response.targetRevision,
-      ),
+      locale,
+      sourceLocale,
+      true,
+      response.documentRevision,
+      response.targetRevision,
     );
+    expectedFormRevisionByDocumentId.set(documentId, nextRevision);
+    projectDocumentRoomSnapshot(document, nextRevision);
   } catch (error) {
     logger.error("Failed to persist canonical Form document", {
       documentName: documentId,
@@ -204,8 +212,10 @@ export const formHandler: DocumentHandler = {
       throw new Error("Form collaboration response locale mismatch");
     }
     const revision = requireFormRevisionTuple(
+      identity.stateKey,
       response.locale,
       response.sourceLocale,
+      response.localeExists,
       response.documentRevision,
       response.targetRevision,
     );
@@ -225,6 +235,7 @@ export const formHandler: DocumentHandler = {
     sourceFormFieldsByDocumentId.set(identity.stateKey, response.source);
     expectedFormRevisionByDocumentId.set(identity.stateKey, revision);
     lastSavedFormSnapshotById.set(identity.stateKey, snapshot);
+    projectDocumentRoomSnapshot(document, revision);
     return Buffer.from(Y.encodeStateAsUpdate(document));
   },
 };

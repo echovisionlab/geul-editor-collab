@@ -30,6 +30,7 @@ import {
   type SnapshotMessage,
 } from "./block-room-protocol-messages.ts";
 import type { CollabConnectionContext } from "./connection-context.ts";
+import type { ResidentBlockMetadataAck } from "./resident-block-metadata.ts";
 import type { ResidentBlockRuntime } from "./resident-block-runtime.ts";
 import { residentBlockDocumentType } from "./resident-block-runtime.ts";
 import {
@@ -342,6 +343,19 @@ export class BlockRoomProtocol {
       if (result.changed) {
         this.dependencies.recordAcceptedMetadataChange(documentName, memberId);
       }
+      if (result.metadataUpdate) {
+        const broadcaster = document as Y.Doc & {
+          broadcastStateless?: (payload: string) => void;
+        };
+        broadcaster.broadcastStateless?.(
+          JSON.stringify({
+            kind: "block_room.metadata_changed",
+            protocolVersion: 2,
+            documentName,
+            ack: result,
+          }),
+        );
+      }
       sendMetadataResult(connection, message.requestId, {
         ok: true,
         ack: result,
@@ -374,7 +388,7 @@ export class BlockRoomProtocol {
     documentType: BlockRoomDocumentType,
     message: MetadataMessage,
     memberId: string,
-  ): Promise<{ changed: boolean }> {
+  ): Promise<ResidentBlockMetadataAck> {
     if (message.operation !== "page_layout") {
       const request = requireMetadataUpdateRequest(
         documentType,
@@ -391,12 +405,14 @@ export class BlockRoomProtocol {
     if (documentType !== "page") {
       throw new Error("request_body_invalid");
     }
+    const layout = parsePageLayout(message.payload);
     const result =
       await this.dependencies.residentBlocks.updatePageDocumentLayout(
         documentName,
         document,
-        parsePageLayout(message.payload),
+        layout.documentLayout,
         [memberId],
+        layout.observedLayout,
       );
     return result;
   }

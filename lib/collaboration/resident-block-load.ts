@@ -1,4 +1,8 @@
-import type { BlockRoomTypedDocument } from "@echovisionlab/geul-common/collaboration/block-room-codec";
+import type { JsonValue } from "@bufbuild/protobuf";
+import type {
+  BlockRoomDocumentType,
+  BlockRoomTypedDocument,
+} from "@echovisionlab/geul-common/collaboration/block-room-codec";
 import type { AIDocumentFieldTarget } from "@echovisionlab/geul-proto/secure/ai_pb.ts";
 import type { ResidentSourceMetadataProjection } from "../api/resident-block-domain.ts";
 
@@ -12,6 +16,15 @@ export interface ResidentBlockDomainLoad {
   presentLocaleValues: readonly AIDocumentFieldTarget[];
   sourceMetadata: ResidentSourceMetadataProjection;
   localeMetadata?: ResidentSourceMetadataProjection;
+  documentMetadata?: Record<string, JsonValue>;
+}
+
+export interface ResidentBlockBootstrapSnapshot extends ResidentBlockDomainLoad {
+  documentName: string;
+  documentType: BlockRoomDocumentType;
+  blockCatalogFingerprint: string;
+  documentMetadata: Record<string, JsonValue>;
+  metadataSequence: number;
 }
 
 export interface ResidentBlockLoadResponse {

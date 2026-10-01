@@ -1,4 +1,4 @@
-import { create } from "@bufbuild/protobuf";
+import { create, type JsonValue } from "@bufbuild/protobuf";
 import {
   PostNullableStringChangeSchema,
   PostStringIdListSchema,
@@ -18,7 +18,7 @@ import {
 } from "../api/resident-document-metadata.ts";
 import { updateWorkLocaleMetadata } from "../api/work.ts";
 
-export type ResidentBlockMetadataUpdate =
+export type ResidentBlockMetadataUpdate = (
   | {
       type: "post";
       scope: "locale";
@@ -38,7 +38,8 @@ export type ResidentBlockMetadataUpdate =
       summary?: string | null;
     }
   | ({ scope: "document" } & ResidentRichTextDocumentMetadataUpdate)
-  | ResidentRichTextMetadataUpdate;
+  | ResidentRichTextMetadataUpdate
+) & { observed?: Record<string, JsonValue> };
 
 export interface ResidentBlockMetadataAck {
   documentRevision: string;
@@ -47,6 +48,11 @@ export interface ResidentBlockMetadataAck {
   changedLocales: string[];
   locale: string;
   targetRevision?: string;
+  metadataUpdate?: {
+    operation: "locale" | "document" | "page_layout";
+    values: Record<string, JsonValue>;
+    sequence: number;
+  };
 }
 
 function pageSummaryChange(value: string | null | undefined) {

@@ -1,4 +1,8 @@
-import { CollaborativeDocumentType } from "@echovisionlab/geul-common/collaboration/document";
+import {
+  CollaborativeDocumentType,
+  createDocumentName,
+  parseDocumentName,
+} from "@echovisionlab/geul-common/collaboration/document";
 import { deserializeProto, Signals } from "@echovisionlab/geul-event";
 import {
   ContentEntityType,
@@ -181,6 +185,45 @@ function sourceLocaleFence(
   return { scope: "entity", documentRevision };
 }
 
+function broadcastExternalEntityChangedHint(
+  server: Server,
+  documentType: CollaborativeDocumentType,
+  entityId: string,
+): number {
+  let broadcastCount = 0;
+  for (const [documentName, document] of server.hocuspocus.documents) {
+    let scope;
+    try {
+      scope = parseDocumentName(documentName);
+    } catch {
+      continue;
+    }
+    if (scope.type !== documentType || scope.entityId !== entityId) {
+      continue;
+    }
+    if (document.getConnectionsCount() === 0) {
+      continue;
+    }
+    const entityDocument = createDocumentName(
+      scope.type,
+      scope.entityId,
+      scope.locale,
+    )
+      .split(":")
+      .slice(0, 2)
+      .join(":");
+    document.broadcastStateless(
+      JSON.stringify({
+        kind: "editor.entity_changed",
+        version: 1,
+        document: entityDocument,
+      }),
+    );
+    broadcastCount += 1;
+  }
+  return broadcastCount;
+}
+
 async function handleContentUpdated(
   server: Server,
   content: Uint8Array,
@@ -195,6 +238,18 @@ async function handleContentUpdated(
   }
   const entityId = requiredNonBlank(event.entityId, "entity_id");
   const fence = externalContentUpdateFence(event);
+  if (!fence && event.source !== ContentUpdateSource.COLLAB) {
+    const broadcastCount = broadcastExternalEntityChangedHint(
+      server,
+      documentType,
+      entityId,
+    );
+    logger.debug("Broadcast neutral entity-change hint", {
+      entityType: ContentEntityType[event.entityType],
+      entityId,
+      broadcastCount,
+    });
+  }
   if (!fence) {
     return;
   }

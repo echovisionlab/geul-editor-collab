@@ -210,6 +210,8 @@ export function sendBootstrap(
       ...(input.snapshot.localeMetadata === undefined
         ? {}
         : { localeMetadata: input.snapshot.localeMetadata }),
+      documentMetadata: input.snapshot.documentMetadata,
+      metadataSequence: input.snapshot.metadataSequence,
       blockCatalogFingerprint: input.snapshot.blockCatalogFingerprint,
       serverInstanceId: input.serverInstanceId,
       roomEpoch: input.roomEpoch,
@@ -290,15 +292,21 @@ export function stateVectorIncludes(
   return true;
 }
 
-export function parsePageLayout(value: JsonValue): DocumentLayout {
+export function parsePageLayout(value: JsonValue): {
+  documentLayout: DocumentLayout;
+  observedLayout: DocumentLayout;
+} {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("request_body_invalid");
   }
   const record = value as Record<string, JsonValue>;
-  if (!hasExactKeys(record, ["documentLayout"])) {
+  if (!hasExactKeys(record, ["documentLayout", "observedLayout"])) {
     throw new Error("request_body_invalid");
   }
-  return fromJson(DocumentLayoutSchema, record.documentLayout);
+  return {
+    documentLayout: fromJson(DocumentLayoutSchema, record.documentLayout),
+    observedLayout: fromJson(DocumentLayoutSchema, record.observedLayout),
+  };
 }
 
 function isAllowedPreAdmissionSync(type: number, payload: Uint8Array): boolean {

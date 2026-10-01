@@ -13,6 +13,7 @@ import { shutdownAdmissionFromContext } from "./connection-context.ts";
 import { COLLAB_RELOAD_REQUIRED_SIGNAL } from "./room-epoch.ts";
 import type { AcceptedDocumentChange } from "./edit-session-contributor-types.ts";
 import { applyInboundMutation } from "./inbound-mutation.ts";
+import { assertInboundFormSchemaUnchanged } from "./inbound-form-schema-guard.ts";
 
 type ConnectedPayload = Parameters<
   NonNullable<ServerConfiguration["connected"]>
@@ -207,6 +208,7 @@ function createBeforeSyncHandler(dependencies: ConnectionHookDependencies) {
           if (collabContext.canEdit === false || connection.readOnly) {
             throw new Error("permission_denied");
           }
+          assertInboundFormSchemaUnchanged(documentName, document, payload);
           return applyInboundMutation(document, connection, payload);
         },
       );

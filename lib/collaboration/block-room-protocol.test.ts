@@ -70,11 +70,19 @@ function setup(
     sourceChanged: true,
     changedLocales: ["ko"],
     locale: "ko",
+    metadataUpdate: { operation: "locale", values: {}, sequence: 8 },
   });
   const updatePageDocumentLayout = vi.fn().mockResolvedValue({
     documentRevision: "revision-2",
     changed: true,
     sourceChanged: false,
+    changedLocales: [],
+    locale: "ko",
+    metadataUpdate: {
+      operation: "page_layout",
+      values: { documentLayout: {} },
+      sequence: 8,
+    },
   });
   const locale = options.target ? "en" : "ko";
   const localizedDocument = options.page
@@ -157,6 +165,8 @@ function setup(
               }),
             ],
         sourceMetadata: { locale: "ko", title: "제목" },
+        documentMetadata: { categoryIds: ["category-1"], tagIds: ["tag-1"] },
+        metadataSequence: 7,
         ...(options.missingTarget
           ? {}
           : {
@@ -249,10 +259,17 @@ describe("resident Block room WebSocket protocol", () => {
       localeExists: true,
       sourceMetadata: { locale: "ko", title: "제목" },
       localeMetadata: { locale: "ko", title: "제목" },
+      documentMetadata: { categoryIds: ["category-1"], tagIds: ["tag-1"] },
+      metadataSequence: 7,
       blockCatalogFingerprint: contentBlockCatalogFingerprint,
       serverInstanceId: "server-a",
       roomEpoch: "epoch-a",
     });
+    expect(bootstrap.documentMetadata).toEqual({
+      categoryIds: ["category-1"],
+      tagIds: ["tag-1"],
+    });
+    expect(bootstrap.metadataSequence).toBe(7);
     expect(
       Buffer.from(bootstrap.yjsBootstrapUpdate as string, "base64"),
     ).toEqual(Buffer.from(Y.encodeStateAsUpdate(document)));
@@ -457,6 +474,9 @@ describe("resident Block room WebSocket protocol", () => {
       documentRevision: "revision-1",
       changed: false,
       sourceChanged: false,
+      changedLocales: [],
+      locale: "ko",
+      metadataUpdate: { operation: "locale", values: {}, sequence: 8 },
     });
     await admit(runtime);
 
@@ -484,6 +504,12 @@ describe("resident Block room WebSocket protocol", () => {
     runtime.protocol.connected(
       runtime.connection as never,
       context(CollaborativeDocumentType.MAP_THEME),
+      DOCUMENT_NAME,
+      runtime.document,
+    );
+    runtime.protocol.connected(
+      runtime.connection as never,
+      {},
       DOCUMENT_NAME,
       runtime.document,
     );
@@ -561,7 +587,7 @@ describe("resident Block room WebSocket protocol", () => {
         protocolVersion: 2,
         requestId: REQUEST_ID,
         operation: "page_layout",
-        payload: { documentLayout: {} },
+        payload: { documentLayout: {}, observedLayout: {} },
       }),
     } as never);
 
@@ -570,6 +596,7 @@ describe("resident Block room WebSocket protocol", () => {
       runtime.document,
       expect.any(Object),
       ["33333333-3333-4333-8333-333333333333"],
+      expect.any(Object),
     );
     expect(
       JSON.parse(runtime.sendStateless.mock.calls.at(-1)![0]),
@@ -1010,7 +1037,14 @@ describe("resident Block room WebSocket protocol", () => {
   });
 
   it.each([
-    [CollaborativeDocumentType.POST, { categoryIds: [], tagIds: [] }],
+    [
+      CollaborativeDocumentType.POST,
+      {
+        categoryIds: [],
+        tagIds: [],
+        observed: { categoryIds: [], tagIds: [] },
+      },
+    ],
     [CollaborativeDocumentType.ARTIST, { slug: "artist" }],
     [CollaborativeDocumentType.LABEL, { slug: "label" }],
   ])(
@@ -1036,6 +1070,7 @@ describe("resident Block room WebSocket protocol", () => {
 
   it.each([
     ["page_layout", {}, "invalid_request"],
+    ["page_layout", { documentLayout: {} }, "invalid_request"],
     ["document", {}, "invalid_request"],
   ])(
     "rejects invalid %s metadata payloads",
@@ -1189,4 +1224,87 @@ describe("resident Block room WebSocket protocol", () => {
       );
     }
   });
+});
+
+it("broadcasts committed metadata and returns the same complete ACK to the requester", async () => {
+  const runtime = setup();
+  const broadcast = vi.fn();
+  Object.assign(runtime.document, { broadcastStateless: broadcast });
+  await admit(runtime);
+  const ack = {
+    documentRevision: "revision-2",
+    changed: true,
+    sourceChanged: true,
+    changedLocales: ["ko"],
+    locale: "ko",
+    metadataUpdate: {
+      operation: "locale",
+      values: { title: "committed" },
+      sequence: 1,
+    },
+  };
+  runtime.updateMetadata.mockResolvedValueOnce(ack);
+  await runtime.protocol.handleStateless({
+    connection: runtime.connection,
+    documentName: DOCUMENT_NAME,
+    document: runtime.document,
+    payload: JSON.stringify({
+      kind: "block_room.metadata",
+      protocolVersion: 2,
+      requestId: REQUEST_ID,
+      operation: "locale",
+      payload: { title: "committed" },
+    }),
+  } as never);
+  expect(JSON.parse(broadcast.mock.calls[0][0])).toEqual({
+    kind: "block_room.metadata_changed",
+    protocolVersion: 2,
+    documentName: DOCUMENT_NAME,
+    ack,
+  });
+  expect(JSON.parse(runtime.sendStateless.mock.calls.at(-1)![0])).toEqual({
+    kind: "block_room.metadata_result",
+    protocolVersion: 2,
+    requestId: REQUEST_ID,
+    ok: true,
+    ack,
+  });
+  runtime.document.destroy();
+});
+
+it("acknowledges an unchanged metadata write without broadcasting a change", async () => {
+  const runtime = setup();
+  const broadcast = vi.fn();
+  Object.assign(runtime.document, { broadcastStateless: broadcast });
+  await admit(runtime);
+  const ack = {
+    documentRevision: "revision-1",
+    changed: false,
+    sourceChanged: false,
+    changedLocales: [],
+    locale: "ko",
+  };
+  runtime.updateMetadata.mockResolvedValueOnce(ack);
+  await runtime.protocol.handleStateless({
+    connection: runtime.connection,
+    documentName: DOCUMENT_NAME,
+    document: runtime.document,
+    payload: JSON.stringify({
+      kind: "block_room.metadata",
+      protocolVersion: 2,
+      requestId: REQUEST_ID,
+      operation: "locale",
+      payload: { title: "제목" },
+    }),
+  } as never);
+  expect(broadcast).not.toHaveBeenCalled();
+  expect(runtime.recordAcceptedMetadataChange).not.toHaveBeenCalled();
+  expect(JSON.parse(runtime.sendStateless.mock.calls.at(-1)![0])).toEqual({
+    kind: "block_room.metadata_result",
+    protocolVersion: 2,
+    requestId: REQUEST_ID,
+    ok: true,
+    ack,
+  });
+  runtime.document.destroy();
 });
