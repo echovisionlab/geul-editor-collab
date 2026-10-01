@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.2.4](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.3...v0.2.4) (2026-10-01)
+
+
+### Bug Fixes
+
+* serialize collaboration actor apply and bound resume tokens ([#17](https://github.com/echovisionlab/geul-editor-collab/issues/17)) ([375709f](https://github.com/echovisionlab/geul-editor-collab/commit/375709f6db742ac96d6db9dddd1eedaf2ba55473))
+
 ## [0.2.3](https://github.com/echovisionlab/geul-editor-collab/compare/v0.2.2...v0.2.3) (2026-09-30)
 
 
