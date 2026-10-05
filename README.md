@@ -4,8 +4,8 @@ Standalone collaborative editor service for Geul.
 
 ## Requirements
 
-- Node.js `24.19.0`
-- pnpm `11.22.0`
+- Node.js `24.21.0`
+- pnpm `12.9.1`
 - PostgreSQL with the collaboration schema and PGMQ queue
 
 All package dependencies are installed from the public npm registry. No GitHub
