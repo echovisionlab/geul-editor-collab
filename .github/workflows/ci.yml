@@ -3,8 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+    paths-ignore:
+      - ".github/**"
+      - ".release-please-manifest.json"
+      - "CHANGELOG.md"
+      - "release-please-config.json"
 
 permissions: {}
 
@@ -31,43 +34,121 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Classify pull request changes
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+
+          run_full=true
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] &&
+             [[ "${HEAD_REF}" = release-please--* ]] &&
+             [ -n "${BASE_SHA}" ] &&
+             [ -n "${HEAD_SHA}" ]; then
+            changed_files="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+            metadata_only=true
+
+            if [ -z "${changed_files}" ]; then
+              metadata_only=false
+            fi
+
+            while IFS= read -r path; do
+              case "${path}" in
+                .release-please-manifest.json|CHANGELOG.md|package.json) ;;
+                *) metadata_only=false ;;
+              esac
+            done <<< "${changed_files}"
+
+            if [ "${metadata_only}" = "true" ]; then
+              if ! python3 - "${BASE_SHA}" "${HEAD_SHA}" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          base_sha, head_sha = sys.argv[1:]
+
+          def read_package(revision: str) -> tuple[str, dict]:
+              raw = subprocess.check_output(
+                  ["git", "show", f"{revision}:package.json"],
+                  text=True,
+              )
+              package = json.loads(raw)
+              version = package.pop("version", None)
+              if not isinstance(version, str):
+                  raise SystemExit(1)
+              return version, package
+
+          base_version, base_package = read_package(base_sha)
+          head_version, head_package = read_package(head_sha)
+          if base_version == head_version or base_package != head_package:
+              raise SystemExit(1)
+          PY
+              then
+                metadata_only=false
+              fi
+            fi
+
+            if [ "${metadata_only}" = "true" ]; then
+              run_full=false
+            fi
+          fi
+
+          echo "run_full=${run_full}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up pnpm
+        if: steps.scope.outputs.run_full == 'true'
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: ${{ env.PNPM_VERSION }}
           run_install: false
 
       - name: Set up Node.js
+        if: steps.scope.outputs.run_full == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
 
       - name: Install dependencies
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm format:check
 
       - name: Lint
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm lint
 
       - name: Typecheck
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm typecheck
 
       - name: Dead code and exports
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm unused
 
       - name: Test with exact coverage
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm test:coverage
 
       - name: Test release image scripts
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm test:ci-scripts
 
       - name: Build
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm build
 
       - name: Check release artifact syntax
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm smoke:release-syntax
 
       - name: Verify bundled dependencies
+        if: steps.scope.outputs.run_full == 'true'
         run: pnpm smoke:release-dependencies
