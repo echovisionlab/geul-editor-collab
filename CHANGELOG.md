@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.3.4](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.3...v0.3.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **build:** use the supported pnpm 12 fetch command ([#29](https://github.com/echovisionlab/geul-editor-collab/issues/29)) ([e6a36e0](https://github.com/echovisionlab/geul-editor-collab/commit/e6a36e0a979aa5a77cca2cbbe2e6efc368be7b34))
+
 ## [0.3.3](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.2...v0.3.3) (2026-10-05)
 
 
