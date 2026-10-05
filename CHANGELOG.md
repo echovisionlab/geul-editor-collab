@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.3.3](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.2...v0.3.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** refresh collaboration runtime and shared packages ([#27](https://github.com/echovisionlab/geul-editor-collab/issues/27)) ([0ecbf66](https://github.com/echovisionlab/geul-editor-collab/commit/0ecbf664dc3ad5329726bcbe89aa13a280b323e3))
+
 ## [0.3.2](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.1...v0.3.2) (2026-10-01)
 
 
