@@ -2,6 +2,13 @@
 
 All notable changes to Geul Editor Collab will be documented here.
 
+## [0.4.0](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.4...v0.4.0) (2026-10-06)
+
+
+### Features
+
+* **collab:** support embed and page audience contracts ([#31](https://github.com/echovisionlab/geul-editor-collab/issues/31)) ([e34aeb4](https://github.com/echovisionlab/geul-editor-collab/commit/e34aeb4e3e12fd5925e99f12c4639e7db2751536))
+
 ## [0.3.4](https://github.com/echovisionlab/geul-editor-collab/compare/v0.3.3...v0.3.4) (2026-10-05)
 
 
