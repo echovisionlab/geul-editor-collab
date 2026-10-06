@@ -5,6 +5,9 @@ importers:
   .:
     configDependencies: {}
     packageManagerDependencies:
+      "@pnpm/exe":
+        specifier: 12.9.1
+        version: 12.9.1
       pnpm:
         specifier: 12.9.1
         version: 12.9.1
@@ -129,6 +132,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  "@pnpm/exe@12.9.1":
+    resolution:
+      {
+        integrity: sha512-TZOVvYq8nwzmw8IR3P1GKZk87tV7vDPCT3oJlL7IhgYNZfLGov4jX0J8RJxuAXxIT3uxg/uiconrLLBv+X5KyA==,
+      }
+    engines: { node: ">=18.*" }
+    hasBin: true
+
   pnpm@12.9.1:
     resolution:
       {
@@ -180,6 +191,23 @@ snapshots:
   "@pnpm/exe.win32-x64@12.9.1":
     optional: true
 
+  "@pnpm/exe@12.9.1":
+    optionalDependencies:
+      "@pnpm/exe.android-arm64": 12.9.1
+      "@pnpm/exe.android-x64": 12.9.1
+      "@pnpm/exe.darwin-arm64": 12.9.1
+      "@pnpm/exe.darwin-x64": 12.9.1
+      "@pnpm/exe.freebsd-x64": 12.9.1
+      "@pnpm/exe.linux-arm64": 12.9.1
+      "@pnpm/exe.linux-arm64-musl": 12.9.1
+      "@pnpm/exe.linux-ppc64": 12.9.1
+      "@pnpm/exe.linux-riscv64": 12.9.1
+      "@pnpm/exe.linux-s390x": 12.9.1
+      "@pnpm/exe.linux-x64": 12.9.1
+      "@pnpm/exe.linux-x64-musl": 12.9.1
+      "@pnpm/exe.win32-arm64": 12.9.1
+      "@pnpm/exe.win32-x64": 12.9.1
+
   pnpm@12.9.1:
     optionalDependencies:
       "@pnpm/exe.android-arm64": 12.9.1
@@ -220,17 +248,17 @@ importers:
         specifier: ^2.2.0
         version: 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
       "@echovisionlab/geul-common":
-        specifier: 0.3.2
-        version: 0.3.2(yjs@13.6.33)
+        specifier: 0.4.0
+        version: 0.4.0(yjs@13.6.33)
       "@echovisionlab/geul-event":
-        specifier: 0.4.1
-        version: 0.4.1(@echovisionlab/geul-proto@0.4.1)
+        specifier: 0.5.0
+        version: 0.5.0(@echovisionlab/geul-proto@0.5.0)
       "@echovisionlab/geul-proto":
-        specifier: 0.4.1
-        version: 0.4.1
+        specifier: 0.5.0
+        version: 0.5.0
       "@echovisionlab/geul-telemetry":
-        specifier: 0.1.4
-        version: 0.1.4
+        specifier: 0.2.0
+        version: 0.2.0
       "@hocuspocus/server":
         specifier: ^4.7.0
         version: 4.7.0(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33)
@@ -486,33 +514,33 @@ packages:
       }
     engines: { node: ">=20.19.0" }
 
-  "@echovisionlab/geul-common@0.3.2":
+  "@echovisionlab/geul-common@0.4.0":
     resolution:
       {
-        integrity: sha512-zB73TPwFc22PrzMQG6bbrtNWZdTCxBHacvEDmIsFBjzzAIyZWiXLg89UIEjxbUZ/qkuiM8j95w6r17rj68UBzA==,
+        integrity: sha512-NJ9DBT5TqtgdTJNfS8mcDlgvC4FNArBROaSRrpf5ZeJhsObpqodURQV2KaS3/Mojd38ED6iFAkA2L3x1svZYpA==,
       }
     engines: { node: 24.21.0 }
     peerDependencies:
       yjs: ^13.6.33
 
-  "@echovisionlab/geul-event@0.4.1":
+  "@echovisionlab/geul-event@0.5.0":
     resolution:
       {
-        integrity: sha512-TIMRndKapMGMlE7x1uaUzZrXKNhSoOoNN7H+la3rYY9dGAe88CPgQJe/Njz5qCpB3rpe3OhTCrrpQg7b27T2eQ==,
+        integrity: sha512-F3pKnYBodpi5g/nYpHGM1c2lD+HLxpVf5+mCmWrBog7cBRHFLdic6LOy32bVW1ax7PSZKfR2FGdsAopCvJFKJA==,
       }
     peerDependencies:
-      "@echovisionlab/geul-proto": ^0.4.0
+      "@echovisionlab/geul-proto": ^0.5.0
 
-  "@echovisionlab/geul-proto@0.4.1":
+  "@echovisionlab/geul-proto@0.5.0":
     resolution:
       {
-        integrity: sha512-oS29iPZ5Zws3Zrndx5iHzextSPXbFHCQtlinP5wqX98cKZqhJB4SnF9ACwN/CUZm8mQ7p7shA7jUQFq9JS/TeQ==,
+        integrity: sha512-/W0lCEDtrUizmW7vOlSDtkpQrYzoI2fVfMiNZ/Om9E4+v7tWzjXyYW7OqrO4jDlYwnvUEni+OYk5puCyWjSz4Q==,
       }
 
-  "@echovisionlab/geul-telemetry@0.1.4":
+  "@echovisionlab/geul-telemetry@0.2.0":
     resolution:
       {
-        integrity: sha512-Uu2mV8vNwqcE1sojvKoyVpHUrDN99efHKNp9nNZxl+knKoNlOWmJJxShoMeIV09anDSXJ3ssjfWrrAofVCLsog==,
+        integrity: sha512-V0jBpcqCNwfThM2L3VdZWat1TEkf8H5fg1tZXbQ/lFnNWcYrUrg6/OMte54mzfUT+zKmZj8M0TrmZncrbyPaoQ==,
       }
     engines: { node: 24.21.0 }
 
@@ -5379,24 +5407,24 @@ snapshots:
 
   "@csstools/css-tokenizer@4.0.2": {}
 
-  "@echovisionlab/geul-common@0.3.2(yjs@13.6.33)":
+  "@echovisionlab/geul-common@0.4.0(yjs@13.6.33)":
     dependencies:
       "@bufbuild/protobuf": 2.16.0
-      "@echovisionlab/geul-proto": 0.4.1
+      "@echovisionlab/geul-proto": 0.5.0
       diff: 9.0.0
       yjs: 13.6.33
       zod: 4.6.5
 
-  "@echovisionlab/geul-event@0.4.1(@echovisionlab/geul-proto@0.4.1)":
+  "@echovisionlab/geul-event@0.5.0(@echovisionlab/geul-proto@0.5.0)":
     dependencies:
       "@bufbuild/protobuf": 2.16.0
-      "@echovisionlab/geul-proto": 0.4.1
+      "@echovisionlab/geul-proto": 0.5.0
 
-  "@echovisionlab/geul-proto@0.4.1":
+  "@echovisionlab/geul-proto@0.5.0":
     dependencies:
       "@bufbuild/protobuf": 2.16.0
 
-  "@echovisionlab/geul-telemetry@0.1.4":
+  "@echovisionlab/geul-telemetry@0.2.0":
     dependencies:
       "@opentelemetry/api": 1.9.1
 
